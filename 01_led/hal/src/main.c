@@ -140,3 +140,31 @@ static void gpio_pc13_init(void)
      */
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
 }
+
+
+
+
+
+
+void SysTick_Handler(void)
+{
+    /*
+     * HAL_Init() 会配置 SysTick，HAL_Delay() 依赖这里的 tick 递增。
+     *
+     * 如果这个中断处理函数缺失，在一些“只有 main.c 的最小工程”里，
+     * CPU 会掉进启动文件的默认中断死循环。
+     *
+     * 现象通常是：
+     * - 程序刚启动时像是运行了一下
+     * - 然后就卡住
+     * - 如果点灯，可能表现成“常亮”或“常灭”
+     */
+    HAL_IncTick();
+}
+
+static void error_handler(void)
+{
+    __disable_irq();
+    while (1) {
+    }
+}

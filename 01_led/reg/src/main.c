@@ -61,7 +61,7 @@ static void gpio_pc13_init(void)
      *
      * IOPCEN = IO Port C Enable
      */
-    RCC->APB2ENR |= RCC_APB2ENR_IOPAEN;
+    RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;
 
     /*
      * 第 2 步：配置 PC13 为“通用推挽输出”。
