@@ -1,0 +1,36 @@
+name: build
+on: [push, pull_request]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - run: sudo apt-get update
+    - run: sudo apt -y install gcc-arm-none-eabi make
+    - run: make -C steps/step-0-minimal
+    - run: make -C steps/step-1-blinky
+    - run: make -C steps/step-2-systick
+    - run: make -C steps/step-3-uart
+    - run: make -C steps/step-4-printf
+    - run: make -C steps/step-5-cmsis
+    - run: make -C steps/step-6-clock
+    - run: make -C steps/step-7-webserver/nucleo-f429zi
+    # - run: make -C steps/step-7-webserver/pico-w5500 test VCON_API_KEY=${{secrets.VCON_API_KEY}}
+    - run: make -C templates/blinky/nucleo-f429zi test VCON_API_KEY=${{secrets.VCON_API_KEY}}
+    #- run: make -C templates/blinky/nucleo-l432kc test VCON_API_KEY=${{secrets.VCON_API_KEY}}
+    - run: make -C templates/cli/nucleo-f429zi test VCON_API_KEY=${{secrets.VCON_API_KEY}}
+    #- run: make -C templates/cli/nucleo-l432kc test VCON_API_KEY=${{secrets.VCON_API_KEY}}
+  macos:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v3
+    - run: HOMEBREW_NO_AUTO_UPDATE=1 brew install gcc-arm-embedded make
+    - run: make -C steps/step-0-minimal
+    - run: make -C steps/step-1-blinky
+    - run: make -C steps/step-2-systick
+    - run: make -C steps/step-3-uart
+    - run: make -C steps/step-4-printf
+    - run: make -C steps/step-5-cmsis
+    - run: make -C steps/step-6-clock
+    - run: make -C steps/step-7-webserver/nucleo-f429zi
+    - run: make -C steps/step-7-webserver/pico-w5500
