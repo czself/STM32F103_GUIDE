@@ -672,6 +672,11 @@ void TIM3_IRQHandler(void)
     HAL_TIM_IRQHandler(&htim3);
 }
 
+void SysTick_Handler(void)
+{
+    HAL_IncTick();
+}
+
 /*
  * HAL_TIM_IC_CaptureCallback —— 输入捕获回调函数
  *

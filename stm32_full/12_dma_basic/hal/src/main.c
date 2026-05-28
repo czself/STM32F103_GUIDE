@@ -328,6 +328,14 @@ static void adc1_init(void)
     }
 
     /*
+     * STM32F1 HAL 不会在 HAL_ADC_Init() 中自动校准 ADC。
+     * 这里显式执行 RSTCAL + CAL，和寄存器版的校准步骤对齐。
+     */
+    if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK) {
+        error_handler();
+    }
+
+    /*
      * 配置通道 1，最长采样时间
      */
     sConfig.Channel = ADC_CHANNEL_1;

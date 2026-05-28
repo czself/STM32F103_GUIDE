@@ -285,21 +285,22 @@ STM32F103 的 ADC 是 12 位的。
 - 为不同通道设置采样时间
 
 F103 有两个 SMPR 寄存器：
+
 - `SMPR1`：管理通道 10~17
 - `SMPR2`：管理通道 0~9
 
 每个通道用 3 位控制采样时间：
 
-| SMP 值 | 采样周期数 |
-|--------|-----------|
-| 000 | 1.5 cycles |
-| 001 | 7.5 cycles |
-| 010 | 13.5 cycles |
-| 011 | 28.5 cycles |
-| 100 | 41.5 cycles |
-| 101 | 55.5 cycles |
-| 110 | 71.5 cycles |
-| 111 | 239.5 cycles |
+| SMP 值 | 采样周期数   |
+| ------ | ------------ |
+| 000    | 1.5 cycles   |
+| 001    | 7.5 cycles   |
+| 010    | 13.5 cycles  |
+| 011    | 28.5 cycles  |
+| 100    | 41.5 cycles  |
+| 101    | 55.5 cycles  |
+| 110    | 71.5 cycles  |
+| 111    | 239.5 cycles |
 
 ### 6.8 `SQR` 是什么
 
@@ -310,6 +311,7 @@ F103 有两个 SMPR 寄存器：
 - 规定"这次要采哪些通道、按什么顺序采"
 
 F103 有三个 SQR 寄存器：
+
 - `SQR1`：最高位存规则组长度 L，低位存第 13~16 个通道
 - `SQR2`：存第 7~12 个通道
 - `SQR3`：存第 1~6 个通道
@@ -393,11 +395,11 @@ ADC 的最大时钟频率限制：
 
 本课 HAL 版会重点用到：
 
-| HAL 函数 | 对应寄存器操作 | 作用 |
-|----------|---------------|------|
-| `HAL_ADC_Start()` | `CR2 |= EXTTRIG \| SWSTART` | 启动一次 ADC 转换 |
+| HAL 函数                        | 对应寄存器操作          | 作用                   |
+| ------------------------------- | ----------------------- | ---------------------- |
+| `HAL_ADC_Start()`             | `CR2                    | = EXTTRIG\| SWSTART`   |
 | `HAL_ADC_PollForConversion()` | `while (!(SR & EOC))` | 等待转换完成（带超时） |
-| `HAL_ADC_GetValue()` | `return DR` | 读取转换结果 |
+| `HAL_ADC_GetValue()`          | `return DR`           | 读取转换结果           |
 
 ---
 
@@ -445,7 +447,7 @@ ADC 的最大时钟频率限制：
 
 对应代码文件：
 
-- [reg/src/main.c](/home/myself/workspace/mcu/stm32/STM32F103C8T6/10_adc_polling/reg/src/main.c)
+- [reg/src/main.c](reg/src/main.c)
 
 ### 8.1 寄存器版主线
 
@@ -464,20 +466,20 @@ ADC 的最大时钟频率限制：
 
 ### 8.2 关键寄存器速查
 
-| 寄存器 | 位/字段 | 本课值 | 含义 |
-|--------|---------|--------|------|
-| `RCC->APB2ENR` | ADC1EN | 1 | 开启 ADC1 时钟 |
-| `RCC->CFGR` | ADCPRE | 10 | PCLK2 / 6 = 12MHz |
-| `ADC1->SQR1` | L[3:0] | 0 | 规则组长度 = 1 - 1 = 0 |
-| `ADC1->SQR3` | SQ1[4:0] | 1 | 第一个通道 = 通道 1 |
-| `ADC1->SMPR2` | SMP1[2:0] | 111 | 采样时间 = 239.5 cycles |
-| `ADC1->CR2` | ADON | 1 | ADC 上电 |
-| `ADC1->CR2` | RSTCAL | 1→0 | 复位校准 |
-| `ADC1->CR2` | CAL | 1→0 | 开始校准 |
-| `ADC1->CR2` | EXTTRIG | 1 | 允许触发 |
-| `ADC1->CR2` | SWSTART | 1 | 软件启动转换 |
-| `ADC1->SR` | EOC | 1 | 转换完成标志 |
-| `ADC1->DR` | [11:0] | 结果 | 12 位转换结果 |
+| 寄存器           | 位/字段   | 本课值 | 含义                    |
+| ---------------- | --------- | ------ | ----------------------- |
+| `RCC->APB2ENR` | ADC1EN    | 1      | 开启 ADC1 时钟          |
+| `RCC->CFGR`    | ADCPRE    | 10     | PCLK2 / 6 = 12MHz       |
+| `ADC1->SQR1`   | L[3:0]    | 0      | 规则组长度 = 1 - 1 = 0  |
+| `ADC1->SQR3`   | SQ1[4:0]  | 1      | 第一个通道 = 通道 1     |
+| `ADC1->SMPR2`  | SMP1[2:0] | 111    | 采样时间 = 239.5 cycles |
+| `ADC1->CR2`    | ADON      | 1      | ADC 上电                |
+| `ADC1->CR2`    | RSTCAL    | 1→0   | 复位校准                |
+| `ADC1->CR2`    | CAL       | 1→0   | 开始校准                |
+| `ADC1->CR2`    | EXTTRIG   | 1      | 允许触发                |
+| `ADC1->CR2`    | SWSTART   | 1      | 软件启动转换            |
+| `ADC1->SR`     | EOC       | 1      | 转换完成标志            |
+| `ADC1->DR`     | [11:0]    | 结果   | 12 位转换结果           |
 
 ---
 
@@ -485,13 +487,14 @@ ADC 的最大时钟频率限制：
 
 对应代码文件：
 
-- [hal/src/main.c](/home/myself/workspace/mcu/stm32/STM32F103C8T6/10_adc_polling/hal/src/main.c)
+- [hal/src/main.c](hal/src/main.c)
 
 ### 9.1 HAL 版的重点看什么
 
 HAL 会把 ADC 配置拆成：
 
 - ADC 整体初始化（句柄 Init 成员 → `HAL_ADC_Init()`）
+- F1 ADC 校准（`HAL_ADCEx_Calibration_Start()`）
 - 通道配置（`ADC_ChannelConfTypeDef` → `HAL_ADC_ConfigChannel()`）
 
 所以你会看到：
@@ -538,16 +541,16 @@ value = HAL_ADC_GetValue(&hadc1);    // 3. 读取结果
 
 ### 10.3 两者如何一一对应
 
-| 功能 | 寄存器版 | HAL 版 |
-|------|---------|--------|
-| 开 ADC 时钟 | `RCC->APB2ENR |= ADC1EN` | `__HAL_RCC_ADC1_CLK_ENABLE()` |
-| ADC 分频 | `RCC->CFGR |= ADCPRE_DIV6` | `__HAL_RCC_ADC_CONFIG(DIV6)` |
-| 配置通道 | `SQR3.SQ1 = 1` | `sConfig.Channel = CHANNEL_1` |
-| 设采样时间 | `SMPR2.SMP1 = 111` | `sConfig.SamplingTime = 239CYCLES` |
-| 校准 | `CAL = 1→0` | `HAL_ADC_Init()` 内部完成 |
-| 启动转换 | `CR2 \|= EXTTRIG \| SWSTART` | `HAL_ADC_Start()` |
-| 等待完成 | `while (!(SR & EOC))` | `HAL_ADC_PollForConversion()` |
-| 读结果 | `return DR` | `HAL_ADC_GetValue()` |
+| 功能        | 寄存器版                     | HAL 版                               |
+| ----------- | ---------------------------- | ------------------------------------ |
+| 开 ADC 时钟 | `RCC->APB2ENR |= ADC1EN`     | `__HAL_RCC_ADC1_CLK_ENABLE()`        |
+| ADC 分频    | `RCC->CFGR |= ADCPRE_DIV6`   | `__HAL_RCC_ADC_CONFIG(DIV6)`         |
+| 配置通道    | `SQR3.SQ1 = 1`             | `sConfig.Channel = CHANNEL_1`      |
+| 设采样时间  | `SMPR2.SMP1 = 111`         | `sConfig.SamplingTime = 239CYCLES` |
+| 校准        | `RSTCAL → CAL`             | `HAL_ADCEx_Calibration_Start()`    |
+| 启动转换    | `CR2 \|= EXTTRIG \| SWSTART` | `HAL_ADC_Start()`                  |
+| 等待完成    | `while (!(SR & EOC))`      | `HAL_ADC_PollForConversion()`      |
+| 读结果      | `return DR`                | `HAL_ADC_GetValue()`               |
 
 ---
 
@@ -565,11 +568,11 @@ value = HAL_ADC_GetValue(&hadc1);    // 3. 读取结果
 
 ### 11.1 换算关系参考
 
-| 电位器位置 | PA1 电压 | ADC 值 | LED 状态 |
-|-----------|---------|--------|---------|
-| 旋到 GND 端 | ~0V | ~0 | 灭 |
-| 旋到中间 | ~1.65V | ~2048 | 临界 |
-| 旋到 3.3V 端 | ~3.3V | ~4095 | 亮 |
+| 电位器位置   | PA1 电压 | ADC 值 | LED 状态 |
+| ------------ | -------- | ------ | -------- |
+| 旋到 GND 端  | ~0V      | ~0     | 灭       |
+| 旋到中间     | ~1.65V   | ~2048  | 临界     |
+| 旋到 3.3V 端 | ~3.3V    | ~4095  | 亮       |
 
 ---
 

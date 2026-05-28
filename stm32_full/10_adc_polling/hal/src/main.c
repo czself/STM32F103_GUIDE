@@ -260,9 +260,10 @@ static void pa1_adc_input_init(void)
 /*
  * adc1_init —— HAL 版 ADC1 初始化
  *
- * 初始化过程分为两步：
+ * 初始化过程分为三步：
  *   1. 填充 hadc1.Init 成员 → 调用 HAL_ADC_Init()
- *   2. 填充 sConfig 结构体 → 调用 HAL_ADC_ConfigChannel()
+ *   2. 调用 HAL_ADCEx_Calibration_Start() 做 F1 ADC 校准
+ *   3. 填充 sConfig 结构体 → 调用 HAL_ADC_ConfigChannel()
  *
  * 两步分离的设计：
  *   Init 处理"ADC 整体的时基和模式"
@@ -329,18 +330,31 @@ static void adc1_init(void)
 
     /*
      * HAL_ADC_Init() 内部做了什么？
-     *   1. 开启 ADC 上电（ADON = 1）
-     *   2. 如果定义了 MspInit 回调，调用它（可用于配置 NVIC、DMA 等）
-     *   3. 执行 ADC 校准（CAL）
-     *
-     * 注意：HAL_ADC_Init 会帮我们做校准，这是寄存器版中手动做的。
+     *   1. 如果定义了 MspInit 回调，调用它（可用于配置 NVIC、DMA 等）
+     *   2. 写入 CR1、CR2、SQR1 等 ADC 整体配置
+ *
+     * 注意：在 STM32F1 HAL 中，校准不是 HAL_ADC_Init 自动完成的。
+     * F1 的 ADC 校准要显式调用 HAL_ADCEx_Calibration_Start()。
      */
     if (HAL_ADC_Init(&hadc1) != HAL_OK) {
         error_handler();
     }
 
     /*
-     * 第 4 步：配置规则组通道
+     * 第 4 步：执行 ADC 校准
+     *
+     * HAL_ADCEx_Calibration_Start() 对应寄存器版：
+     *   1. 确保 ADC 停止转换
+     *   2. 使能 ADC 并等待稳定
+     *   3. 设置 RSTCAL，等待硬件清零
+     *   4. 设置 CAL，等待硬件清零
+     */
+    if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK) {
+        error_handler();
+    }
+
+    /*
+     * 第 5 步：配置规则组通道
      *
      * Channel：ADC_CHANNEL_1 → 通道 1（PA1）
      * Rank：ADC_REGULAR_RANK_1 → 规则组第 1 位
@@ -362,6 +376,11 @@ static void adc1_init(void)
     if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
         error_handler();
     }
+}
+
+void SysTick_Handler(void)
+{
+    HAL_IncTick();
 }
 
 /*

@@ -12,6 +12,7 @@
 static TIM_HandleTypeDef htim2;
 
 static void system_clock_72mhz_init(void);
+static void hal_msp_init_minimal(void);
 static void gpio_pa0_pwm_init(void);
 static void tim2_pwm_init(void);
 static uint32_t next_duty(uint32_t duty, int8_t direction);
@@ -23,6 +24,7 @@ int main(void)
     int8_t direction = 1;
 
     HAL_Init();
+    hal_msp_init_minimal();
     system_clock_72mhz_init();
     gpio_pa0_pwm_init();
     tim2_pwm_init();
@@ -78,6 +80,18 @@ static void system_clock_72mhz_init(void)
     if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK) {
         error_handler();
     }
+}
+
+static void hal_msp_init_minimal(void)
+{
+    __HAL_RCC_AFIO_CLK_ENABLE();
+    __HAL_RCC_PWR_CLK_ENABLE();
+
+    /*
+     * Blue Pill 常用 ST-Link/SWD 下载调试。
+     * 关闭 JTAG，保留 SWD，避免 JTAG 复用占住部分 GPIO。
+     */
+    __HAL_AFIO_REMAP_SWJ_NOJTAG();
 }
 
 static void gpio_pa0_pwm_init(void)
@@ -145,6 +159,11 @@ static uint32_t next_duty(uint32_t duty, int8_t direction)
         return 0U;
     }
     return duty - step;
+}
+
+void SysTick_Handler(void)
+{
+    HAL_IncTick();
 }
 
 static void error_handler(void)

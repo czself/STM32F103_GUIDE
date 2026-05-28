@@ -190,6 +190,8 @@ static void adc1_init(void)
 
     if (HAL_ADC_Init(&hadc1) != HAL_OK) error_handler();
 
+    if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK) error_handler();
+
     sConfig.Channel = ADC_CHANNEL_1;
     sConfig.Rank = ADC_REGULAR_RANK_1;
     sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;

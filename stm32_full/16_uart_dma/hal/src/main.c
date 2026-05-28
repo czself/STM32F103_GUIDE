@@ -225,6 +225,11 @@ void USART1_IRQHandler(void)
     HAL_UART_IRQHandler(&huart1);
 }
 
+void SysTick_Handler(void)
+{
+    HAL_IncTick();
+}
+
 /*
  * HAL_UART_TxCpltCallback —— DMA 发送完成回调
  *

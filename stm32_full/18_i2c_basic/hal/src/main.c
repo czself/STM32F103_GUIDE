@@ -267,3 +267,8 @@ static void error_handler(void)
     while (1) {
     }
 }
+
+void SysTick_Handler(void)
+{
+    HAL_IncTick();
+}

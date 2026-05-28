@@ -157,9 +157,11 @@ static void pa1_adc_input_init(void)
  *   2. 中断使能（EOCIE）在 Start_IT 中完成，不在 init 中
  *
  * HAL_ADC_Init() 内部做了什么：
- *   1. 上电（ADON = 1）
- *   2. 如果定义了 HAL_ADC_MspInit 回调，调用它（可在其中配 NVIC）
- *   3. 执行校准
+ *   1. 如果定义了 HAL_ADC_MspInit 回调，调用它（可在其中配 NVIC）
+ *   2. 写入 CR1、CR2、SQR1 等 ADC 整体配置
+ *
+ * 注意：STM32F1 HAL 的 ADC 校准需要显式调用
+ * HAL_ADCEx_Calibration_Start()，不会由 HAL_ADC_Init 自动完成。
  *
  * 本课没有用 MspInit 回调，而是直接在 adc1_init 最后手动配置 NVIC。
  */
@@ -190,7 +192,16 @@ static void adc1_init(void)
     }
 
     /*
-     * 第 3 步：配置通道（通道 1 + 最长采样时间）
+     * 第 3 步：执行 ADC 校准
+     *
+     * 对应寄存器版 RSTCAL → 等待 → CAL → 等待。
+     */
+    if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK) {
+        error_handler();
+    }
+
+    /*
+     * 第 4 步：配置通道（通道 1 + 最长采样时间）
      */
     sConfig.Channel = ADC_CHANNEL_1;
     sConfig.Rank = ADC_REGULAR_RANK_1;

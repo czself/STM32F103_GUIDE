@@ -4,6 +4,8 @@
 
 这份文档用于汇总整套 STM32 教学课程的目录、先后顺序、依赖关系和每课最终 Demo 目标。
 
+学习过程中遇到的真实问题统一记录在 [LEARNING_ISSUES.md](/home/sz/coderepo/stm32/stm32_full/LEARNING_ISSUES.md)。
+
 当前约束如下：
 
 - 每个知识点一个目录

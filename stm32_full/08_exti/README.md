@@ -240,7 +240,6 @@ AFIO->EXTICR[0] &= ~AFIO_EXTICR1_EXTI0;
 
 如果你想把中断改到  **PB0** ，代码应该这样写：
 
-
 ```
 // 1. 先清零最低4位 (EXTI0对应的位置)
 AFIO->EXTICR[0] &= ~AFIO_EXTICR1_EXTI0; 
@@ -253,7 +252,6 @@ AFIO->EXTICR[0] |= 0x01;
 1. **引脚 5** 落在 `EXTICR[1]`（即 EXTICR2）里。
 2. **端口 C** 对应的数值是  **2** 。
 3. 对应的位区间是第 4~7 位（负责 EXTI5）。
-
 
 ```
 AFIO->EXTICR[1] &= ~AFIO_EXTICR2_EXTI5; // 清零 EXTI5 所在的位
