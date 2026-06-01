@@ -6,6 +6,8 @@
 
 学习过程中遇到的真实问题统一记录在 [LEARNING_ISSUES.md](/home/sz/coderepo/stm32/stm32_full/LEARNING_ISSUES.md)。
 
+常用通信接口的总体对比见 [COMMUNICATION_INTERFACES_COMPARISON.md](/home/sz/coderepo/stm32/stm32_full/COMMUNICATION_INTERFACES_COMPARISON.md)。
+
 当前约束如下：
 
 - 每个知识点一个目录

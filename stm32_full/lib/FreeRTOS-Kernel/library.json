@@ -1,0 +1,10 @@
+{
+  "name": "FreeRTOS-Kernel",
+  "version": "10.5.1",
+  "description": "FreeRTOS Kernel V10.5.1 - ARM_CM3 port + heap_4 only",
+  "build": {
+    "includeDir": "include",
+    "srcDir": "."
+  },
+  "frameworks": ["stm32cube"]
+}
