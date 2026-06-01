@@ -1,0 +1,14 @@
+temp/
+
+.pio
+
+**/.pio/
+
+**/build/
+
+**/dist/
+
+**/.cache/
+**/cache/
+
+**/.vscode/
