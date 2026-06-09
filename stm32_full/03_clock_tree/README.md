@@ -1,41 +1,39 @@
-# 第 3 课：时钟系统与时钟树
+# 第 3 课：时钟树与 72MHz 系统时钟
 
 ## 1. 本课到底在学什么
 
-这节课表面上仍然会看到一个 LED 闪烁的 Demo，但真正要学的不是点灯，而是：
+这节课表面上是在做：
 
-- STM32F103 的系统时钟从哪里来
-- 时钟是怎么一层一层分发给 CPU、总线和外设的
-- 为什么很多外设如果不先开时钟就不能正常工作
-- 为什么后面学定时器、串口、ADC、DMA 时都绕不开时钟系统
+- 把 STM32F103 的系统时钟配置到 72MHz
+- 用 PC13 LED 闪烁观察程序是否稳定运行
 
-前两课你已经实际遇到过：
+真正学习的是 STM32 的时钟链路：
 
-- 为什么 `GPIOC` 要先开时钟
-- 为什么 `GPIOA` 要先开时钟
+```text
+HSE 8MHz
+  -> PLL 输入选择 HSE
+  -> PLL x9 得到 72MHz
+  -> SYSCLK 选择 PLL
+  -> AHB = 72MHz
+  -> APB1 = 36MHz
+  -> APB2 = 72MHz
+  -> GPIO/USART/TIM/SysTick 等外设获得正确频率基准
+```
 
-但那只是“外设时钟使能”的一小部分。
-
-这一课会把更上层的内容补上，也就是：
-
-- 系统时钟源怎么选择
-- `HSI / HSE / PLL` 分别是什么
-- `SYSCLK / HCLK / PCLK1 / PCLK2` 分别是什么
-- 为什么 F103 常见配置是 `8MHz HSE -> PLL x9 -> 72MHz`
-- 为什么 `APB1` 必须分频到 `36MHz`
-- 为什么高频运行前必须配置 `FLASH` 等待周期
+前两课里你已经能控制 GPIO，但那些代码如果不先理解时钟，就只是在“刚好能跑”。从本课开始，你要知道：**延时准不准、串口波特率对不对、定时器频率怎么算，根都在时钟树**。
 
 ## 2. 本课学习目标
 
-本课完成后，你应该能回答清楚这些问题：
+学完本课，你应该能回答：
 
-- `HSI`、`HSE`、`PLL` 各是什么
-- `SYSCLK`、`HCLK`、`PCLK1`、`PCLK2` 各自负责什么
-- 为什么系统时钟切换不能直接“随便改一个寄存器”
-- 为什么 `FLASH->ACR` 要先配置等待周期
-- `RCC->CR`、`RCC->CFGR` 分别负责什么
-- 为什么 `APB1` 在 F103 上不能跑到 72MHz
-- HAL 里的 `HAL_RCC_OscConfig()` 和 `HAL_RCC_ClockConfig()` 本质上在做什么
+1. `HSE`、`HSI`、`PLL`、`SYSCLK` 分别是什么？
+2. 为什么 BluePill 常用 8MHz HSE 乘 9 得到 72MHz？
+3. 为什么切到 72MHz 前要先设置 `FLASH->ACR`？
+4. 为什么 APB1 要分频到 36MHz，而 APB2 可以保持 72MHz？
+5. `RCC->CR` 和 `RCC->CFGR` 分别负责时钟链路里的哪一段？
+6. 为什么必须等待 `HSERDY`、`PLLRDY` 和 `SWS`？
+7. HAL 版的 `RCC_OscInitTypeDef` 和 `RCC_ClkInitTypeDef` 分别映射到哪些寄存器配置？
+8. 如果时钟配错，后续串口、定时器、延时会出现什么问题？
 
 ## 3. 本课目录结构
 
@@ -50,614 +48,549 @@
     └── src/main.c
 ```
 
-说明：
-
-- `reg/`：寄存器版，重点理解时钟切换链路
-- `hal/`：HAL版，重点理解工程里标准时钟配置方式
+`reg/` 直接操作 `FLASH` 和 `RCC` 寄存器。  
+`hal/` 使用 HAL 的时钟配置结构体和 API 完成同样的时钟切换。
 
 ## 4. 实验硬件
 
-### 4.1 开发板
+- 开发板：STM32F103C8T6 BluePill
+- 下载器：ST-Link
+- 外部高速时钟：板载 8MHz HSE 晶振
+- 观察现象：PC13 LED 以固定节奏闪烁
 
-- STM32F103C8T6 BluePill
-
-### 4.2 下载器
-
-- ST-Link
-
-### 4.3 板载 LED
-
-- `PC13`
-
-本课仍然使用 LED 来承载“程序在稳定运行”这个现象。
-
-但要明确：
-
-- LED 只是现象载体
-- 本课真正的主角是时钟系统
-
-### 4.4 关于 HSE
-
-本课默认你使用的是常见 BluePill 板子，板上通常带有外部高速晶振：
-
-- `8MHz`
-
-这就是本课里会用到的：
-
-- `HSE`
-
-如果你的板子外部晶振异常或没有正确起振，那么本课基于 `HSE + PLL` 的时钟配置就不会成功。
+本课默认 HSE 可用。如果你的板子没有 8MHz 外部晶振，代码会卡在等待 `HSERDY` 的循环里。
 
 ## 5. 先建立一个最基本的脑图
 
-本课可以先把时钟系统粗略理解成一条“供能链路”：
-
-1. 先选一个原始时钟源
-2. 如有需要，再通过 PLL 倍频
-3. 得到系统主时钟 `SYSCLK`
-4. `SYSCLK` 再分发给：
-   - `HCLK`
-   - `PCLK1`
-   - `PCLK2`
-5. CPU、总线和外设分别从这些时钟中取时钟
-
-对 STM32F103 常见配置来说，这条链路通常是：
-
-1. 外部晶振 `HSE = 8MHz`
-2. 送进 `PLL`
-3. `PLL x9`
-4. 得到 `72MHz`
-5. 把 `72MHz` 作为 `SYSCLK`
-6. 再分发成：
-   - `HCLK = 72MHz`
-   - `PCLK1 = 36MHz`
-   - `PCLK2 = 72MHz`
-
-### 5.1 先不要把“开外设时钟”和“系统时钟切换”混为一谈
-
-你前两课写过：
-
-```c
-RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;
+```text
+配置 Flash 等待周期
+  -> 打开 HSE
+  -> 等待 HSE 稳定
+  -> 配置 AHB/APB 分频
+  -> 配置 PLL 来源为 HSE，倍频 x9
+  -> 打开 PLL
+  -> 等待 PLL 锁定
+  -> SYSCLK 切换到 PLL
+  -> 等待 SWS 确认切换完成
+  -> 初始化 PC13 并闪烁 LED
 ```
 
-这属于：
+这条链路里最关键的是：
 
-- 给某个外设打开总线时钟
+1. **先把时钟源稳定下来，再切换系统时钟。**
+2. **先配置 Flash 等待周期，再让 CPU 跑到 72MHz。**
 
-而本课讲的是更上层的事情：
-
-- 整个芯片现在跑多快
-- 这个“快”从哪里来
-
-所以这节课的 `RCC` 会比前两课更复杂。
+如果顺序乱了，程序可能卡住、跑飞，或者后续外设频率整体不对。
 
 ## 6. 先认识本课里出现的核心名词
 
-### 6.1 RCC 是什么
+### 6.1 `HSE` 是什么
 
-`RCC` 全称是：
-
-- Reset and Clock Control
+`HSE` 全称是：
+- High-Speed External oscillator
 
 中文通常叫：
-
-- 复位与时钟控制
-
-前两课你已经见过它的“外设时钟使能”这一面。
-
-本课要看到它更完整的一面：
-
-- 使能某个振荡源
-- 等待振荡源稳定
-- 配置 PLL 来源和倍频
-- 选择系统时钟来源
-- 设置总线分频
-- 给外设开总线时钟
-
-也就是说：
-
-- `RCC` 既管“时钟从哪来”
-- 也管“时钟发给谁”
-
-### 6.2 HSI 是什么
-
-`HSI` 全称可以理解成：
-
-- High Speed Internal
-
-也就是：
-
-- 内部高速时钟
-
-你可以把它理解成芯片内部自带的高速 RC 振荡源。
-
-在 STM32F103 里，默认上电时系统常从 `HSI` 起步。
-
-它的优点是：
-
-- 不依赖外部晶振
-- 上电就能用
-
-缺点是：
-
-- 精度通常不如外部晶振
-
-### 6.3 HSE 是什么
-
-`HSE` 全称可以理解成：
-
-- High Speed External
-
-也就是：
-
 - 外部高速时钟
 
-本课里它通常来自 BluePill 板上的：
+它的作用是：
+- 给 MCU 提供比内部 RC 更稳定的时钟源。
+- 常见 BluePill 使用 8MHz 外部晶振。
 
-- `8MHz` 外部晶振
+你可以先把它理解成：
+- 板子上那颗给芯片提供稳定节拍的外部时钟。
 
-它的优点是：
+在本课里，HSE 是 PLL 的输入。没有 HSE，就不能按本课路线得到精确的 72MHz。
 
-- 精度高
-- 很适合做系统主时钟基础
+### 6.2 `PLL` 是什么
 
-### 6.4 PLL 是什么
+`PLL` 全称是：
+- Phase-Locked Loop
 
-`PLL` 是锁相环。
+中文通常叫：
+- 锁相环
 
-对当前学习阶段，你可以先把它理解成：
+它的作用是：
+- 把输入时钟倍频成更高频率。
+- 让 8MHz HSE 通过 x9 得到 72MHz。
 
-- 一个时钟倍频器
+你可以先把它理解成：
+- 时钟倍频器。
 
-例如：
+在本课里，PLL 位于 HSE 和 SYSCLK 之间。PLL 来源或倍频配错，整个系统频率都会错，后面的定时器、串口波特率都会跟着错。
 
-- 输入 `8MHz`
-- 配成 `x9`
-- 输出就变成 `72MHz`
+### 6.3 `SYSCLK` 是什么
 
-所以本课的关键配置之一就是：
+`SYSCLK` 全称是：
+- System Clock
 
-- `HSE -> PLL -> x9 -> 72MHz`
+中文通常叫：
+- 系统时钟
 
-### 6.5 SYSCLK 是什么
+它的作用是：
+- 作为 CPU 和总线时钟树的核心来源。
+- 可以选择来自 HSI、HSE 或 PLL。
 
-`SYSCLK` 可以理解成：
+你可以先把它理解成：
+- 整个芯片运行节奏的总源头。
 
-- 系统主时钟
+在本课里，最终要让 `SYSCLK = PLLCLK = 72MHz`。如果只打开 PLL 但不切换 SYSCLK，CPU 仍不会使用 PLL。
 
-它是整棵时钟树中非常核心的一层。
+### 6.4 `FLASH->ACR` 是什么
 
-你可以先粗略理解成：
+`FLASH->ACR` 全称是：
+- Flash Access Control Register
 
-- 芯片后续很多时钟分发都从它出发
+中文通常叫：
+- Flash 访问控制寄存器
 
-### 6.6 HCLK 是什么
+它的作用是：
+- 配置 Flash 预取和等待周期。
+- 保证高频运行时 CPU 从 Flash 取指可靠。
 
-`HCLK` 是 AHB 总线时钟。
+你可以先把它理解成：
+- CPU 高速读程序前，给 Flash 设置“跟得上”的节奏。
 
-对于当前阶段，你可以先把它理解成：
+在本课里，72MHz 下设置 `FLASH_ACR_LATENCY_2`。如果等待周期太少，程序可能运行不稳定，甚至时钟刚切过去就跑飞。
 
-- 内核和高性能总线这一侧主要使用的时钟
+### 6.5 `RCC->CR` 是什么
 
-很多时候，F103 常见配置里：
-
-- `HCLK = SYSCLK`
-
-也就是：
-
-- 不再分频，直接 72MHz
-
-### 6.7 PCLK1 和 PCLK2 是什么
-
-它们分别是：
-
-- `PCLK1`：APB1 总线时钟
-- `PCLK2`：APB2 总线时钟
-
-STM32F103 上很多外设都挂在 APB1 或 APB2 上。
-
-所以这些外设的工作频率和它们所在总线时钟密切相关。
-
-### 6.8 为什么 APB1 要分频到 36MHz
-
-F103 这一代有一个重要限制：
-
-- `APB1` 最大不能超过 `36MHz`
-
-如果系统主时钟最终跑到：
-
-- `72MHz`
-
-那么：
-
-- `APB1` 不能直接也设成 72MHz
-
-所以必须对 APB1 分频：
-
-- `72MHz / 2 = 36MHz`
-
-这也是为什么本课常见配置是：
-
-- `HCLK = 72MHz`
-- `PCLK1 = 36MHz`
-- `PCLK2 = 72MHz`
-
-### 6.9 `RCC->CR` 是什么
-
-`CR` 可以理解成：
-
+`RCC->CR` 全称是：
 - Clock Control Register
 
-也就是：
+中文通常叫：
+- RCC 时钟控制寄存器
 
-- 时钟控制寄存器
+它的作用是：
+- 打开或关闭 HSE、PLL 等时钟源。
+- 通过 ready 标志告诉软件时钟是否稳定。
 
-它负责控制和反映一些关键时钟源的状态，例如：
+你可以先把它理解成：
+- 时钟源的开关和状态面板。
 
-- HSI 是否开启
-- HSE 是否开启
-- HSE 是否稳定
-- PLL 是否开启
-- PLL 是否锁定稳定
+在本课里，`HSEON`、`HSERDY`、`PLLON`、`PLLRDY` 都在 `RCC->CR`。只开不等 ready，后续配置就可能基于未稳定时钟。
 
-所以你会在寄存器版看到：
+### 6.6 `RCC->CFGR` 是什么
 
-- 打开 HSE
-- 等待 `HSERDY`
-- 打开 PLL
-- 等待 `PLLRDY`
-
-这些动作都和 `RCC->CR` 有关。
-
-### 6.10 `RCC->CFGR` 是什么
-
-`CFGR` 可以理解成：
-
+`RCC->CFGR` 全称是：
 - Clock Configuration Register
 
-也就是：
+中文通常叫：
+- RCC 时钟配置寄存器
 
-- 时钟配置寄存器
+它的作用是：
+- 配置 AHB/APB 分频。
+- 选择 PLL 输入来源和倍频。
+- 选择 SYSCLK 来源。
 
-它主要负责：
+你可以先把它理解成：
+- 时钟树的路线图设置寄存器。
 
-- 选择 PLL 输入来源
-- 配置 PLL 倍频
-- 配置 AHB/APB 分频
-- 选择系统时钟源
-- 反映当前系统时钟到底切到了哪里
+在本课里，它决定 HSE 是否送进 PLL、PLL 是否 x9、APB1 是否 /2、SYSCLK 是否切到 PLL。
 
-所以本课里你会看到它非常频繁地出现。
+### 6.7 `HSERDY` 是什么
 
-### 6.11 `FLASH->ACR` 是什么
+`HSERDY` 全称是：
+- HSE Ready flag
 
-这是 `FLASH` 模块的访问控制寄存器。
+中文通常叫：
+- HSE 稳定标志
 
-你可能会奇怪：
+它的作用是：
+- 表示外部高速时钟已经稳定。
+- 软件必须等它置位后，才适合继续使用 HSE。
 
-- 配时钟为什么要去碰 FLASH？
+你可以先把它理解成：
+- HSE 对 CPU 说“我准备好了”。
 
-原因是：
+在本课里，若外部晶振损坏或没有焊接，程序会卡在等待 `HSERDY` 的循环里。
 
-- 当系统主频升高后，CPU 访问 Flash 的速度也必须匹配
-- 如果主频太高但 Flash 等待周期没配好，系统可能不稳定
+### 6.8 `PLLRDY` 是什么
 
-所以在 F103 上切到 72MHz 前，必须先把 Flash 等待周期配置好。
+`PLLRDY` 全称是：
+- PLL Ready flag
 
-你可以先记住本课最关键的经验结论：
+中文通常叫：
+- PLL 锁定标志
 
-- `72MHz` 运行前，要配置 `FLASH_LATENCY_2`
+它的作用是：
+- 表示 PLL 输出已经稳定。
+- 软件必须等它置位后，才能把 SYSCLK 切到 PLL。
 
-寄存器版里对应的就是：
+你可以先把它理解成：
+- PLL 倍频器锁定到目标频率后的完成信号。
 
-- `FLASH->ACR`
+在本课里，不等 `PLLRDY` 就切换系统时钟，会让 CPU 使用不稳定时钟。
 
-## 7. 本课 Demo 要实现什么
+### 6.9 `APB1/APB2` 是什么
 
-本课的 Demo 会做两件事：
+`APB` 全称是：
+- Advanced Peripheral Bus
 
-1. 把系统时钟配置到常见的 `72MHz`
-2. 再去闪烁 `PC13` 板载 LED
+中文通常叫：
+- 高级外设总线
 
-这个 Demo 的重点不是闪灯本身，而是证明：
+它的作用是：
+- 给不同外设提供时钟和访问通道。
+- F103 中 APB1 最高 36MHz，APB2 最高 72MHz。
 
-- 在切换时钟后，程序仍然稳定运行
+你可以先把它理解成：
+- 外设所在的两条总线。
 
-### 7.1 为什么本课不做“精确时间验证”
+在本课里，`SYSCLK = 72MHz` 时，APB1 必须设置为 `/2`，得到 36MHz；APB2 可以不分频保持 72MHz。如果 APB1 不分频，会超过规格。
 
-因为精确时间验证更适合放在下一课：
+### 6.10 `HAL_RCC_OscConfig` 是什么
 
-- `04_systick`
+`HAL_RCC_OscConfig` 全称是：
+- HAL RCC Oscillator Configuration
 
-本课只要求你先把“时钟切换链路”吃透。
+中文通常叫：
+- HAL 振荡器配置函数
 
-后面我们会在 SysTick、定时器、UART 等课程里不断看到这些时钟配置的实际影响。
+它的作用是：
+- 根据 `RCC_OscInitTypeDef` 配置 HSE、HSI、PLL 等振荡源。
+- 等待对应时钟源稳定。
 
-## 8. 寄存器版代码逐步讲解
+你可以先把它理解成：
+- HAL 版里配置“时钟源和 PLL”的函数。
 
-对应代码文件：
+在本课里，它对应寄存器版打开 HSE、选择 PLL 来源、设置 PLL x9、打开 PLL 并等待稳定。
 
-- [reg/src/main.c](/home/myself/workspace/mcu/stm32/STM32F103C8T6/03_clock_tree/reg/src/main.c)
+### 6.11 `HAL_RCC_ClockConfig` 是什么
 
-### 8.1 寄存器版这节课的主线
+`HAL_RCC_ClockConfig` 全称是：
+- HAL RCC Clock Configuration
 
-寄存器版会按下面顺序做：
+中文通常叫：
+- HAL 总线时钟配置函数
 
-1. 配置 Flash 等待周期
-2. 打开 HSE
-3. 等待 HSE 稳定
-4. 配置 PLL 来源为 HSE，并设置倍频为 x9
-5. 打开 PLL
-6. 等待 PLL 稳定
-7. 配置 AHB / APB1 / APB2 分频
-8. 把系统时钟切换到 PLL
-9. 等待切换完成
-10. 再初始化 LED 并闪烁
+它的作用是：
+- 选择 SYSCLK 来源。
+- 设置 AHB、APB1、APB2 分频。
+- 设置 Flash latency。
 
-### 8.2 为什么顺序不能乱
+你可以先把它理解成：
+- HAL 版里把稳定的时钟源分配给 CPU 和各条总线的函数。
 
-这个顺序非常关键。
+在本课里，它对应寄存器版配置 `RCC->CFGR` 的 HPRE、PPRE、SW，并配置 Flash 等待周期。
 
-例如：
+## 7. 寄存器版代码逐步讲解
 
-- 如果还没让 HSE 稳定，就拿它喂给 PLL，配置就不完整
-- 如果 PLL 还没锁定稳定，就切系统时钟到 PLL，系统可能异常
-- 如果没先调 Flash 等待周期，就直接上 72MHz，可能不稳定
+寄存器版在 [reg/src/main.c](reg/src/main.c)。
 
-所以时钟配置不像 GPIO 点灯那样“写几个寄存器就行”，它更强调： 
+### 7.1 先看完整逻辑
 
-- 依赖关系
-- 准备顺序
-- 状态确认
+```c
+system_clock_72mhz_init();
+led_pc13_init();
 
-## 9. HAL版代码逐步讲解
+while (1) {
+    GPIOC->BRR = GPIO_BRR_BR13;
+    delay(1200000U);
+    GPIOC->BSRR = GPIO_BSRR_BS13;
+    delay(1200000U);
+}
+```
 
-对应代码文件：
+时钟配置先于 LED 初始化，是因为本课要先建立 72MHz 系统基准，再用 LED 观察程序稳定运行。
 
-- [hal/src/main.c](/home/myself/workspace/mcu/stm32/STM32F103C8T6/03_clock_tree/hal/src/main.c)
+### 7.2 第一步为什么配置 `FLASH->ACR`
 
-### 9.1 HAL 版里为什么会出现两个时钟配置结构体
+```c
+FLASH->ACR = FLASH_ACR_PRFTBE | FLASH_ACR_LATENCY_2;
+```
 
-你会看到 HAL 版通常使用：
+`FLASH_ACR_PRFTBE` 打开预取缓冲。  
+`FLASH_ACR_LATENCY_2` 设置 2 个等待周期。
 
-- `RCC_OscInitTypeDef`
-- `RCC_ClkInitTypeDef`
+这一步必须在切到 72MHz 前完成。否则 CPU 从 Flash 取指可能跟不上时钟，程序会变得不稳定。
 
-它们分别用于描述两类事情：
+### 7.3 为什么先打开并等待 HSE
 
-1. 振荡源和 PLL 怎么配
-2. 系统时钟和总线分频怎么配
+```c
+RCC->CR |= RCC_CR_HSEON;
+while ((RCC->CR & RCC_CR_HSERDY) == 0U) {
+}
+```
 
-所以 HAL 其实是把“底层时钟链路配置”拆成了两个配置对象。
+`HSEON` 是启动外部高速时钟的开关。`HSERDY` 是外部时钟稳定标志。
 
-### 9.2 `HAL_RCC_OscConfig()` 是什么
+HSE 启动需要时间，所以不能置位后立刻使用。若板子没有 HSE，程序会卡在这里，这是一个很典型的排错点。
 
-这个 API 主要负责：
+### 7.4 `RCC->CFGR` 为什么先清零再设置
 
-- 配置振荡源
-- 配置 PLL
+代码先清除相关字段：
 
-比如：
+```c
+RCC->CFGR &= ~(RCC_CFGR_HPRE |
+               RCC_CFGR_PPRE1 |
+               RCC_CFGR_PPRE2 |
+               RCC_CFGR_PLLSRC |
+               RCC_CFGR_PLLXTPRE |
+               RCC_CFGR_PLLMULL |
+               RCC_CFGR_SW);
+```
 
-- HSE 开不开
-- PLL 开不开
-- PLL 输入来自哪里
-- PLL 倍频是多少
+这些字段分别控制 AHB 分频、APB1 分频、APB2 分频、PLL 来源、PLL 预分频、PLL 倍频、系统时钟选择。
 
-本质上，它就是在帮你改和振荡源、PLL 相关的 RCC 底层寄存器。
+先清零是为了避免旧值残留。例如 PLL 倍频字段如果旧值没清干净，就可能不是 x9。
 
-### 9.3 `HAL_RCC_ClockConfig()` 是什么
+然后设置目标值：
 
-这个 API 主要负责：
+```c
+RCC->CFGR |= RCC_CFGR_HPRE_DIV1;
+RCC->CFGR |= RCC_CFGR_PPRE1_DIV2;
+RCC->CFGR |= RCC_CFGR_PPRE2_DIV1;
+RCC->CFGR |= RCC_CFGR_PLLSRC;
+RCC->CFGR |= RCC_CFGR_PLLMULL9;
+```
 
-- 选择系统时钟源
-- 配置 AHB/APB 分频
-- 同时设置 Flash 等待周期
+含义是：
 
-也就是说，这个函数把“系统时钟切换”和“总线分频配置”做了统一封装。
+- AHB 不分频：HCLK = 72MHz。
+- APB1 二分频：PCLK1 = 36MHz。
+- APB2 不分频：PCLK2 = 72MHz。
+- PLL 输入来自 HSE。
+- PLL 倍频 x9。
 
-### 9.4 为什么 HAL 版也必须显式写出 Flash 延时
+### 7.5 为什么 APB1 要 `/2`
 
-因为 HAL 并不是魔法。
+STM32F103 的 APB1 最高频率是 36MHz。系统时钟跑到 72MHz 后，如果 APB1 不分频，就会超过规格。
 
-你虽然是通过：
+所以本课设置：
 
-- `HAL_RCC_ClockConfig(..., FLASH_LATENCY_2)`
+```text
+PCLK1 = HCLK / 2 = 36MHz
+```
 
-去写的，但本质上仍然是在满足：
+这个值后面会影响 USART2/3、I2C、TIM2/3/4 等挂在 APB1 上的外设。
 
-- 72MHz 时 Flash 访问必须匹配的硬件要求
+### 7.6 为什么打开 PLL 后还要等 `PLLRDY`
 
-## 10. 寄存器版和 HAL版对比
+```c
+RCC->CR |= RCC_CR_PLLON;
+while ((RCC->CR & RCC_CR_PLLRDY) == 0U) {
+}
+```
 
-### 10.1 寄存器版重点看什么
+PLL 需要时间锁定到稳定输出。`PLLRDY = 1` 才说明 72MHz 输出可用。
 
-- HSE 和 PLL 的使能与就绪等待
-- `RCC->CR` 和 `RCC->CFGR` 的职责划分
-- 为什么分频和系统时钟切换要按步骤来
-- 为什么 Flash 等待周期必须先处理
+如果不等它稳定就切换系统时钟，CPU 可能运行在不稳定时钟上。
 
-### 10.2 HAL版重点看什么
+### 7.7 为什么切换后还要等 `SWS`
 
-- 如何用标准结构体表达时钟树配置
-- `HAL_RCC_OscConfig()` 和 `HAL_RCC_ClockConfig()` 的分工
-- HAL 对底层 RCC 配置的封装方式
+```c
+RCC->CFGR &= ~RCC_CFGR_SW;
+RCC->CFGR |= RCC_CFGR_SW_PLL;
+while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL) {
+}
+```
 
-### 10.3 两者如何一一对应
+`SW` 是“请求切换到哪个时钟源”。  
+`SWS` 是“当前实际正在使用哪个时钟源”。
 
-- 寄存器版开 HSE / PLL <-> HAL 的 `HAL_RCC_OscConfig()`
-- 寄存器版设分频和切系统时钟 <-> HAL 的 `HAL_RCC_ClockConfig()`
-- 寄存器版手动配 `FLASH->ACR` <-> HAL 中传入 `FLASH_LATENCY_2`
+写 `SW` 后硬件需要一点时间完成切换，所以要等待 `SWS` 变成 PLL。只写 `SW` 不看 `SWS`，不能保证系统已经真正切过去。
 
-## 11. 检验问题清单
+## 8. HAL 版代码逐步讲解
 
-完成本课后，请自己回答下面这些问题：
+HAL 版在 [hal/src/main.c](hal/src/main.c)。
 
-1. **HSI、HSE、PLL 分别是什么？** 它们之间有什么区别？
+### 8.1 HAL 版和寄存器版的本质差异
 
-   - **答**：HSI（High Speed Internal）是内部 RC 振荡器，精度差但不依赖外部元件。HSE（High Speed External）是外部晶振，通常 8MHz，精度好。PLL 是锁相环，可以倍频。
-2. **SYSCLK、HCLK、PCLK1、PCLK2 各自的作用是什么？**
+HAL 版把时钟源配置拆成两个结构体：
 
-   - **答**：SYSCLK 是系统主时钟（72MHz），HCLK 是 AHB 总线时钟（72MHz），PCLK1 是 APB1 时钟（36MHz），PCLK2 是 APB2 时钟（72MHz）。不同外设从不同时钟源获得时钟。
-3. **为什么 APB1 在 F103 上最多 36MHz？**
+- `RCC_OscInitTypeDef`：描述振荡器和 PLL。
+- `RCC_ClkInitTypeDef`：描述 SYSCLK、HCLK、PCLK1、PCLK2。
 
-   - **答**：这是芯片硬件限制。F103 的 APB1 最大频率就是 36MHz，不能更高。如果配置成更高会出错。
-4. **配置时钟时为什么一定要先改 Flash 等待周期？**
+它和寄存器版做的是同一条时钟链路。
 
-   - **答**：Flash 存储器的访问速度有限制。系统时钟越快，Flash 读取需要的等待周期越多。如果先改时钟不改 Flash，可能读不出数据，程序崩溃。
-5. **为什么不能直接切换系统时钟源？** 需要按什么顺序？
+### 8.2 `RCC_OscInitTypeDef` 每个字段是什么
 
-   - **答**：直接切可能导致时序混乱。标准流程是：先确保新时钟源稳定就绪，再改 CFGR 的 SWS 位切换，切换后再改分频。
-6. **RCC->CR 和 RCC->CFGR 分别负责什么？**
+```c
+osc.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+osc.HSEState = RCC_HSE_ON;
+osc.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
+osc.PLL.PLLState = RCC_PLL_ON;
+osc.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+osc.PLL.PLLMUL = RCC_PLL_MUL9;
+```
 
-   - **答**：CR（Control Register）主要管时钟源的开关和就绪状态。CFGR（Configuration Register）主要管时钟选择和分频。
-7. **为什么说"72MHz HSE+PLL x9"是 F103 的标准配置？**
+这些字段对应：
 
-   - **答**：8MHz 外晶 x9 = 72MHz，恰好用满 F103 的最高频率，同时通过分频得到 APB1 的 36MHz。这个配置最常见，资料最多。
-8. **如果配置完时钟后程序跑得飞快或飞慢，该怎么排查？**
+- 使用 HSE。
+- 打开 HSE。
+- HSE 不预分频。
+- 打开 PLL。
+- PLL 输入来自 HSE。
+- PLL 倍频 x9。
 
-   - **答**：先确认 SYSCLK、HCLK、PCLK1、PCLK2 的实际值。可以通过串口打印当前配置。再确认 PLL 倍数、分频值是否正确。最后确认 Flash 等待周期是否满足。
+`HAL_RCC_OscConfig(&osc)` 对应寄存器版的 HSE/PLL 配置与等待 ready。
 
-## 12. 工程实现步骤
+### 8.3 `RCC_ClkInitTypeDef` 每个字段是什么
 
-在实际工程项目中，这一课的典型步骤应该如下：
+```c
+clk.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
+clk.APB1CLKDivider = RCC_HCLK_DIV2;
+clk.APB2CLKDivider = RCC_HCLK_DIV1;
+```
 
-### 12.1 需求分析
+这些字段对应：
 
-- 确定目标系统时钟频率（通常 72MHz）
-- 确定所有外设的时钟需求
-- 确定 Flash 等待周期
+- SYSCLK 选择 PLL。
+- AHB 不分频。
+- APB1 二分频。
+- APB2 不分频。
 
-### 12.2 硬件核查
+`HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2)` 对应寄存器版设置 `SW/HPRE/PPRE`，并配置 Flash latency。
 
-- 确认外部晶振频率（本课 8MHz）
-- 确认晶振是否起振正常
-- 查手册确认时钟树约束
+### 8.4 为什么 HAL 版要检查返回值
 
-### 12.3 寄存器实现路线
+```c
+if (HAL_RCC_OscConfig(&osc) != HAL_OK) {
+    error_handler();
+}
+```
 
-按这个顺序：
+如果 HSE 不稳定、PLL 配置非法，HAL 会返回错误。继续运行只会让后续 GPIO、延时、串口全部建立在错误时钟上，所以进入 `error_handler()` 更容易定位问题。
 
-1. **配 Flash 等待周期**：改 `FLASH->ACR` 为 `FLASH_ACR_LATENCY_2`
-2. **使能 HSE**：改 `RCC->CR` 的 HSEON 位
-3. **等待 HSE 就绪**：轮询 `RCC->CR` 的 HSERDY 位
-4. **配 PLL 倍数**：改 `RCC->CFGR` 的 PLLMUL 位为 9
-5. **使能 PLL**：改 `RCC->CR` 的 PLLON 位
-6. **等待 PLL 就绪**：轮询 `RCC->CR` 的 PLLRDY 位
-7. **设分频**：改 `RCC->CFGR` 的 HPRE、PPRE1、PPRE2 位
-8. **切系统时钟**：改 `RCC->CFGR` 的 SW 位为 PLL 源
+### 8.5 `SysTick_Handler()` 为什么出现在 HAL 版
 
-### 12.4 HAL 实现路线
+HAL 版使用 `HAL_Delay()` 闪灯，所以需要 HAL Tick 递增：
 
-1. `RCC_OscInitTypeDef osc = {0};` - 配置震荡源（HSE、PLL）
-2. `HAL_RCC_OscConfig(&osc);` - 实现 HSE + PLL 配置
-3. `RCC_ClkInitTypeDef clk = {0};` - 配置分频和时钟源
-4. `HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2);` - 实现切换和 Flash 配置
+```c
+void SysTick_Handler(void)
+{
+    HAL_IncTick();
+}
+```
 
-### 12.5 工程思路
+如果没有这个中断处理，`HAL_Delay()` 可能卡住。本课虽然重点是时钟树，但 HAL 版运行现象仍依赖 SysTick。
 
-- **开发初期**：用 HAL 的标准模板，不要随意改参数
-- **性能调优**：如果需要不同时钟，对照手册和 HAL 源码来改
-- **多板卡适配**：不同板子的外晶可能不同，要做成可配置参数
-- **低功耗场景**：可能需要动态改时钟，但变化幅度要在允许范围内
+## 9. 两个版本真正应该怎么学
 
-### 12.6 常见工程陷阱
+### 9.1 先学寄存器版
 
-- 忘了改 Flash 等待周期，高频运行时程序崩溃
-- 配置错 APB 分频，某些外设不能用
-- HSE 没起振，却还在等待，导致程序卡住
-- 不同芯片的 PLL 倍数计算不同，代码迁移出错
+寄存器版让你看见时钟切换的硬顺序：Flash、HSE、PLL、分频、SYSCLK。这个顺序非常重要。
 
-## 13. 运行现象
+### 9.2 再看 HAL 版
 
-如果程序正常，烧录后你会看到：
+HAL 版让你看到工程中如何用结构体表达同样配置。
 
-- 板载 LED 稳定闪烁
+### 9.3 正确心智模型
 
-这说明：
+`HAL_RCC_OscConfig()` 和 `HAL_RCC_ClockConfig()` 不是两个“魔法函数”，它们分别对应“时钟源/PLL配置”和“系统/总线分频配置”。
 
-- 时钟切换后系统仍在稳定运行
+## 10. 检验问题清单
 
-### 11.1 这节课更推荐观察什么
+1. **为什么 8MHz HSE 可以得到 72MHz？**
+   - **答**：PLL 输入选择 HSE，倍频设置为 x9，所以 8MHz x 9 = 72MHz。
 
-相比单纯看 LED，这节课更推荐你把注意力放在：
+2. **为什么切到 72MHz 前要配置 Flash latency？**
+   - **答**：CPU 高频取指时 Flash 响应速度跟不上，需要等待周期保证稳定。
 
-- 代码里的时钟切换顺序
-- 每个等待 ready 标志位的原因
-- 为什么 APB1 要分频
+3. **为什么 APB1 要分频到 36MHz？**
+   - **答**：STM32F103 的 APB1 最大频率是 36MHz，HCLK 为 72MHz 时必须二分频。
 
-也就是说：
+4. **`HSERDY` 和 `PLLRDY` 有什么作用？**
+   - **答**：它们分别表示 HSE 和 PLL 已稳定，未稳定前不能作为可靠时钟源。
 
-- 现象只是“程序还活着”
-- 学习重点是“时钟树配置逻辑”
+5. **`SW` 和 `SWS` 有什么区别？**
+   - **答**：`SW` 是软件请求切换到哪个时钟源，`SWS` 是硬件反馈当前实际使用哪个时钟源。
 
-## 14. 常见问题排查
+6. **时钟配错会影响哪些后续功能？**
+   - **答**：会影响延时、SysTick、定时器频率、串口波特率、I2C/SPI 时序和 RTOS Tick。
 
-### 14.1 程序烧录后完全没反应
+7. **HAL 版两个 RCC 配置函数分别对应什么？**
+   - **答**：`HAL_RCC_OscConfig()` 配置 HSE/PLL，`HAL_RCC_ClockConfig()` 配置 SYSCLK 和总线分频。
 
-优先检查：
+## 11. 工程实现步骤
 
-1. 板子的外部 8MHz 晶振是否正常
-2. 是否正确等待了 `HSERDY`
-3. 是否正确等待了 `PLLRDY`
-4. 是否真的把系统时钟切到了 PLL
-5. Flash 等待周期是否正确
+### 11.1 需求分析
 
-### 12.2 LED 不闪或闪烁异常
+本课要把系统时钟配置到 72MHz，并用 LED 闪烁证明程序稳定运行。
 
-优先检查：
+### 11.2 硬件核查
 
-1. `PC13` 是否仍然正确配置为输出
-2. 时钟切换是否成功
-3. 延时循环是否过短或过长
-4. BluePill 的 LED 极性是否与你理解一致
+确认板子有 8MHz HSE。若 HSE 不存在或不起振，本课寄存器版会卡在 `HSERDY`，HAL 版会进入错误处理。
 
-### 12.3 为什么这节课不马上讲 SysTick
+### 11.3 寄存器实现路线
 
-因为这节课只聚焦：
+1. 设置 Flash 等待周期，保证高频取指稳定。
+2. 打开 HSE，并等待 `HSERDY`。
+3. 配置 AHB/APB 分频，特别是 APB1 /2。
+4. 配置 PLL 来源和倍频。
+5. 打开 PLL，并等待 `PLLRDY`。
+6. SYSCLK 切换到 PLL，并等待 `SWS` 确认。
+7. 用 LED 闪烁观察程序运行。
 
-- 时钟系统
+### 11.4 HAL 实现路线
 
-如果现在把 SysTick 一起展开，会把：
+1. 调用 `HAL_Init()`。
+2. 填写 `RCC_OscInitTypeDef`，描述 HSE 和 PLL。
+3. 调用 `HAL_RCC_OscConfig()`。
+4. 填写 `RCC_ClkInitTypeDef`，描述 SYSCLK/AHB/APB。
+5. 调用 `HAL_RCC_ClockConfig()` 并传入 `FLASH_LATENCY_2`。
+6. 初始化 LED 并用 `HAL_Delay()` 观察节奏。
 
-- 内核定时器
-- 中断
-- 毫秒节拍
+### 11.5 工程思维
 
-一起混进来，主线就不纯了。
+时钟配置通常是工程最早执行的代码之一。后续外设初始化之前，必须先知道系统和总线频率是多少。
 
-所以下一课再单独讲：
+### 11.6 常见工程陷阱
 
-- SysTick 如何建立精确毫秒时间基准
+- HSE 不存在却等待 HSE：程序卡死在 `HSERDY`。
+- Flash latency 配小：高频运行不稳定。
+- APB1 没分频：超过芯片规格。
+- 以为写了 `SW` 就已经切换：没有检查 `SWS`，可能误判频率。
 
-## 15. 本课要点总结
+## 12. 运行现象
 
-本课最核心的结论如下：
+PC13 LED 稳定闪烁。
 
-1. 时钟系统决定了芯片整体运行频率和各总线频率
-2. F103 常见配置是 `8MHz HSE -> PLL x9 -> 72MHz`
-3. `RCC->CR` 主要管时钟源和 PLL 的开关及就绪状态
-4. `RCC->CFGR` 主要管时钟选择和总线分频
-5. `APB1` 在 F103 上最大只能到 `36MHz`
-6. 高速运行前必须先配置 Flash 等待周期
-7. HAL 版的时钟配置本质上仍然是在完成同样的底层动作
+本课 LED 不是为了学 GPIO，而是作为“程序切到 72MHz 后仍稳定运行”的可见现象。
+
+## 13. 常见问题排查
+
+### 13.1 程序卡住不闪
+
+优先判断卡在哪里：如果卡在 `HSERDY`，查 HSE 晶振；如果卡在 `PLLRDY`，查 PLL 来源和倍频配置。
+
+### 13.2 HAL 版进入 `error_handler()`
+
+检查 `HAL_RCC_OscConfig()` 或 `HAL_RCC_ClockConfig()` 的返回值。重点查 HSE 是否可用、PLL 参数是否合法、Flash latency 是否正确。
+
+### 13.3 后续串口乱码或定时器频率不对
+
+先回头查本课时钟配置。系统频率或 APB 分频错，会让所有基于时钟计算的外设参数整体偏移。
+
+### 13.4 LED 节奏和预期不同
+
+寄存器版空循环延时依赖 CPU 频率和编译优化；HAL 版 `HAL_Delay()` 依赖 SysTick。先区分是哪种延时方式。
+
+## 14. 本课最核心的结论
+
+1. HSE 8MHz 通过 PLL x9 可以得到 72MHz 系统时钟。
+2. 切到高频前必须先配置 Flash 等待周期。
+3. APB1 最高 36MHz，72MHz HCLK 下必须二分频。
+4. `ready` 标志不是装饰，必须等时钟稳定后再继续。
+5. 后续所有定时、波特率和 RTOS Tick 都依赖本课时钟基础。
+
+## 15. 建议你现在怎么读这节课
+
+1. 先画出 HSE、PLL、SYSCLK、AHB、APB1、APB2 的关系图。
+2. 再读寄存器版，按顺序标出每一步改了 `FLASH->ACR` 还是 `RCC`。
+3. 然后读 HAL 版，把结构体字段映射回寄存器版。
+4. 最后尝试把 PLL 倍频改小，观察 LED 节奏或调试变量变化。
 
 ## 16. 扩展练习
 
-本课完成后，你可以尝试：
-
-1. 把时钟改回 HSI，再观察程序仍然可以运行
-2. 修改 AHB/APB 分频并记录自己的理解
-3. 查手册确认 `RCC->CFGR` 中各个分频位的含义
+1. 把 PLL 倍频从 x9 改成 x8，思考系统频率变成多少。
+2. 故意不等待 `HSERDY`，理解为什么这不是可靠写法。
+3. 在调试器里观察 `RCC->CFGR` 的 `SWS` 位。
+4. 对比 HAL 版和寄存器版的 APB1 分频配置。
 
 ## 17. 下一课预告
 
-下一课建议进入：
+下一课进入 [04_core_architecture_memory_map](../04_core_architecture_memory_map/README.md)。
 
-- `04_systick`
-
-因为有了这一课的时钟基础之后，下一步最自然的内容就是：
-
-- 用已知的系统时钟去建立精确的毫秒节拍
-- 把“粗糙空转延时”升级为“可计算、可解释的时间基准”
+你已经知道“时钟从哪里来”。下一课会看“寄存器为什么能用 C 指针访问”，也就是 Cortex-M3 的地址空间和存储器映射。

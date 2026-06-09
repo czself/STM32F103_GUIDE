@@ -10,7 +10,7 @@
 
 ### 1. 发生在哪
 
-- 课程：`07_pwm_advanced`
+- 课程：`09_pwm_advanced`
 - 工程：`hal/`
 - 对照工程：`reg/`
 - 芯片/开发板：STM32F103C8T6 Blue Pill
@@ -141,8 +141,8 @@ hal_msp_init_minimal();
 
 - HAL 版用了 `HAL_Delay()`
 - 寄存器版没用 `HAL_Delay()`
-- 上一课 `06_pwm_basic/hal` 里有 `SysTick_Handler()`
-- 当前 `07_pwm_advanced/hal` 里没有 `SysTick_Handler()`
+- 上一课 `08_pwm_basic/hal` 里有 `SysTick_Handler()`
+- 当前 `09_pwm_advanced/hal` 里没有 `SysTick_Handler()`
 
 所以真正的问题不是“PWM 配错”，而是“主循环没有继续跑”。
 

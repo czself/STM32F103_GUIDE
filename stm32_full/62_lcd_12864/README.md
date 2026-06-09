@@ -1,0 +1,514 @@
+# 62_lcd_12864 - 12864 LCD 串口镜像显示
+
+## 1. 本课到底在学什么
+
+本课表面现象是：PC 端通过 USART1 以 921600 波特率发送帧，STM32 收到完整帧后通过 SPI1 驱动 ST7920 12864 LCD 显示内容，处理完成后 PC13 翻转并回发 `0x55` ACK。文本帧显示 4 行 16 字符，位图帧显示 128x64 像素。
+
+真正要学的是“串口帧协议 + LCD 串行驱动 + 显示内存映射”的完整链路。寄存器版保留最小可运行底层实验：收帧后把前 64 字节经 SPI 送到 LCD 串口作为预览；HAL 版实现更完整的 ST7920 初始化、文本 DDRAM 写入、位图 GDRAM 写入、UART 帧头中断和 payload DMA 接收。
+
+本课是显示接口与通信协议课，源码没有操作系统调度结构。文档只按现象层、硬件层、芯片模块层、寄存器层、C/CMSIS 层、HAL/工程层拆解。
+
+## 2. 本课学习目标
+
+- 能解释 12864 LCD ST7920 串行模式的接线。
+- 能说明 PC 帧格式 `0xAA + mode + payload`。
+- 能区分文本帧 64 字节和位图帧 1024 字节。
+- 能解释 USART1 921600 为什么用于高速传帧。
+- 能说明 SPI1 为什么只发 SCK/MOSI。
+- 能解释 ST7920 一个字节为什么拆成 3 个 SPI 字节。
+- 能说明 HAL 版帧头中断和 payload DMA 两阶段接收。
+- 能根据无 ACK、乱码、LCD 无显示、位图错位排查。
+
+## 3. 本课目录结构
+
+```text
+62_lcd_12864/
+├── README.md
+├── reg/
+│   ├── platformio.ini
+│   └── src/main.c
+└── hal/
+    ├── platformio.ini
+    └── src/main.c
+```
+
+寄存器版和 HAL 版不是完全同等复杂度。寄存器版重点证明 USART1 收帧、SPI1 发 LCD 串行数据、PB0/PB1/PC13 控制链路；HAL 版承担更完整的显示协议、DMA 接收和文本/位图刷新。
+
+## 4. 实验硬件与工程前提
+
+- STM32F103C8T6 BluePill。
+- LCD：12864B/ST7920 控制器，PSB 接 GND 进入串行模式。
+- PB0：LCD RS/CS，软件片选。
+- PB1：LCD RST，低有效复位。
+- PA5：SPI1 SCK，连接 LCD E/SCLK。
+- PA7：SPI1 MOSI，连接 LCD R/W/SID。
+- PA9/PA10：USART1 TX/RX，连接 PC 或 USB-TTL。
+- PC13：收到完整帧后翻转。
+- 串口速率：921600。
+- 文本帧：`0xAA 0x01 + 64 bytes`。
+- 位图帧：`0xAA 0x02 + 1024 bytes`。
+
+LCD 对比度 V0 很关键。很多“代码没效果”其实是对比度没调好，屏幕全白或全黑。背光也要按模块要求串限流电阻。
+
+## 5. 先建立一个最基本的脑图
+
+```text
+PC 发送帧头 0xAA + mode
+  -> STM32 USART1 接收帧头
+  -> 根据 mode 判断 payload 长度
+  -> 接收 64 字节文本或 1024 字节位图
+  -> ST7920 初始化到文本/图形模式
+  -> SPI1 发送 ST7920 串行格式数据
+  -> PB0 控制 CS，PB1 控制 RST
+  -> LCD DDRAM/GDRAM 更新
+  -> PC13 翻转，USART1 回发 0x55
+```
+
+这条链路里，USART 负责从 PC 收帧，SPI 负责向 LCD 送串行数据，GPIO 负责片选/复位/LED，LCD 控制器负责把 DDRAM/GDRAM 内容变成屏幕像素。
+
+## 6. 先认识本课里出现的核心名词
+
+### 6.1 `ST7920` 是什么
+
+ST7920 是很多 12864 LCD 模块使用的控制器。
+它有并口和串行模式，本课使用 PSB=GND 的串行模式。
+
+### 6.2 `12864` 是什么
+
+12864 表示 128 列、64 行像素。
+文本模式常按 4 行、每行 16 个 ASCII 字符处理。
+
+### 6.3 `PSB` 是什么
+
+PSB 是 ST7920 接口模式选择脚。
+接 GND 进入串行模式，接高电平通常是并口模式。
+
+### 6.4 `帧头 0xAA` 是什么
+
+它是 PC 到 STM32 协议的同步字节。
+接收端靠它判断一帧从哪里开始。
+
+### 6.5 `MODE_TEXT 0x01` 是什么
+
+文本模式标志。
+后面固定跟 64 字节，代表 4 行 x 16 字符。
+
+### 6.6 `MODE_BMP 0x02` 是什么
+
+位图模式标志。
+后面固定跟 1024 字节，代表 128x64/8 的像素数据。
+
+### 6.7 `ACK 0x55` 是什么
+
+STM32 处理完当前帧后回给 PC 的确认字节。
+PC 可以等 ACK 后再发下一帧，避免覆盖或错帧。
+
+### 6.8 `USART1 921600` 是什么
+
+这是高速串口速率。
+1024 字节位图若用 115200 会明显变慢。
+
+### 6.9 `SPI1` 是什么
+
+SPI1 用来产生 ST7920 串行模式需要的 SCLK 和 SID 数据。
+虽然 ST7920 不是标准 SPI 从机，但可以借用 SPI 硬件发波形。
+
+### 6.10 `PB0 CS` 是什么
+
+PB0 连接 LCD RS/CS。
+发送一个 ST7920 串行字节时拉有效，发送后释放。
+
+### 6.11 `PB1 RST` 是什么
+
+PB1 控制 LCD 复位。
+初始化时拉低再拉高，等待 LCD 内部稳定。
+
+### 6.12 `DDRAM` 是什么
+
+LCD 文本显示内存。
+HAL 版用 0x80/0x90/0x88/0x98 设置四行地址。
+
+### 6.13 `GDRAM` 是什么
+
+LCD 图形显示内存。
+HAL 版把 1024 字节位图写到 GDRAM。
+
+### 6.14 `0xF8/0xFA` 是什么
+
+ST7920 串行同步字节。
+0xF8 表示写命令，0xFA 表示写数据。
+
+### 6.15 `高低半字节` 是什么
+
+ST7920 串行模式下，一个命令/数据字节要拆成高半字节和低半字节。
+因此实际 SPI 发送同步字节、高半字节、低半字节共 3 字节。
+
+### 6.16 `DMA1_Channel5` 是什么
+
+HAL 版 USART1_RX 的 DMA 通道。
+payload 较长，用 DMA 接收比逐字节中断更稳。
+
+## 7. 寄存器版代码逐步讲解
+
+### 7.1 时钟初始化
+
+配置 72MHz 系统时钟。
+USART1 921600 和 SPI1 分频都依赖这个时钟。
+
+### 7.2 GPIO 初始化
+
+PC13 输出作帧处理指示，PB0/PB1 输出作 LCD CS/RST。
+PA5/PA7 后续配置为 SPI 复用输出。
+
+### 7.3 USART1 初始化
+
+PA9 复用推挽 TX，PA10 输入 RX。
+BRR 写 `0x004E`，目标是 921600 附近的高速串口。
+
+### 7.4 usart1_rx
+
+轮询 RXNE，读 DR 得到一个字节。
+寄存器版为了最小链路，没有使用中断/DMA。
+
+### 7.5 usart1_tx
+
+等待 TXE 后写 DR。
+处理完帧后发送 ACK_BYTE。
+
+### 7.6 SPI1 初始化
+
+PA5/PA7 配复用推挽，SPI1 配主机、软件 NSS、使能 SPE。
+BR_1 分频让 LCD 通信不要过快。
+
+### 7.7 spi1_write
+
+等 TXE 后写 8 位 DR，再等 BSY 清零。
+等 BSY 是为了确保这一字节真的发完。
+
+### 7.8 lcd_select
+
+PB0 控制 LCD CS。
+本寄存器版中 on 时拉低，off 时拉高，按当前硬件封装约定工作。
+
+### 7.9 lcd_send_raw
+
+片选 LCD，SPI 发一个原始字节，再释放片选。
+它还不是完整 ST7920 三字节封装。
+
+### 7.10 lcd_send_frame_preview
+
+收到 PC 帧后只把前 64 字节送到 LCD 串口。
+这是底层预览链路，不是完整文本/位图刷新。
+
+### 7.11 main 收帧
+
+先等 0xAA，再读 mode，决定 len。
+非法 mode 丢弃。
+
+### 7.12 PC13 和 ACK
+
+收完并发送预览后翻转 PC13，再回发 0x55。
+这证明 STM32 完成了一帧处理。
+
+## 8. HAL 版代码逐步讲解
+
+### 8.1 HAL_Init 和时钟
+
+HAL 版先初始化 HAL tick，再配置 72MHz。
+本课的 SysTick_Handler 只调用 HAL_IncTick，用于 HAL 延时计数。
+
+### 8.2 SPI1 初始化
+
+SPI 主模式、单线发送、8 位、CPOL=0、CPHA=0、/32 分频、MSB first。
+PA5/PA7 作为 SCK/MOSI。
+
+### 8.3 USART1 + DMA 初始化
+
+USART1 配 921600 8N1。
+DMA1_Channel5 配外设到内存、内存递增、普通模式。
+
+### 8.4 帧头中断阶段
+
+先开 RXNE 中断逐字节收 2 字节帧头。
+这样能先判断 payload 长度。
+
+### 8.5 payload DMA 阶段
+
+帧头合法后关闭 RXNE 中断，调用 HAL_UART_Receive_DMA 接收 64 或 1024 字节。
+DMA 完成后进入回调。
+
+### 8.6 HAL_UART_RxCpltCallback
+
+DMA payload 接收完成后置 `frame_ready=1`。
+主循环看到后处理文本或位图。
+
+### 8.7 错误处理
+
+USART1_IRQHandler 检查 ORE/FE/NE。
+先读 SR 再读 DR 清错误，并重新同步帧头。
+
+### 8.8 lcd_write_byte
+
+把一个 ST7920 命令/数据拆成 3 个 SPI 字节。
+CS 拉高发送，发完拉低并延时。
+
+### 8.9 lcd_init
+
+RST 低脉冲复位，发送 0x30、显示开、清屏、输入模式、扩展/图形模式。
+LCD 初始化顺序错会导致无显示。
+
+### 8.10 lcd_set_xy
+
+四行地址不是线性递增：0x80、0x90、0x88、0x98。
+这是 ST7920 DDRAM 映射特点。
+
+### 8.11 process_text_frame
+
+64 字节拆成 4 行，每行 16 字符。
+不足部分由 PC 端或数据帧用空格补齐。
+
+### 8.12 lcd_draw_bitmap
+
+进入图形模式，按 y=0..31、x=0..15 写上半和下半屏。
+它把 1024 字节位图映射到 GDRAM。
+
+### 8.13 frame_ack_send
+
+处理完成后发 0x55。
+PC 端可用 ACK 控制发送节奏。
+
+## 9. 两个版本真正应该怎么学
+
+寄存器版重点是底层连通：USART1 能收到 PC 帧，SPI1 能发字节，PB0/PB1/PC13 能控制 LCD 和指示状态。它故意不实现完整 ST7920 显示协议，避免底层对照代码太厚。
+
+HAL 版重点是完整工程：帧头用中断同步，payload 用 DMA 接收，主循环处理 frame_ready，再通过 ST7920 DDRAM/GDRAM 刷新屏幕。HAL 版代码长，是因为 LCD 协议本身就复杂。
+
+学习时不要用寄存器版判断 LCD 最终显示效果是否完整；它只是预览链路。真正看文本和位图刷新，要读 HAL 版的 `lcd_write_byte()`、`lcd_write_line()` 和 `lcd_draw_bitmap()`。
+
+## 10. 检验问题清单
+
+### 10.1 为什么 12864 文本帧是 64 字节？
+
+**答**：4 行 x 每行 16 字符，正好 64 字节。
+
+### 10.2 为什么位图帧是 1024 字节？
+
+**答**：128 x 64 像素，每 8 个像素 1 字节，所以是 1024 字节。
+
+### 10.3 为什么需要 0xAA 帧头？
+
+**答**：用于同步帧边界，避免接收端从错误位置解释数据。
+
+### 10.4 为什么用 921600？
+
+**答**：位图帧较大，高波特率能减少刷新等待。
+
+### 10.5 ST7920 一个字节为什么发 3 个 SPI 字节？
+
+**答**：串行协议要求同步字节、高半字节、低半字节三段。
+
+### 10.6 HAL 版为什么帧头不用 DMA？
+
+**答**：先逐字节判断 mode，确定 payload 长度后再启动 DMA。
+
+### 10.7 DMA 完成后为什么发 ACK？
+
+**答**：告诉 PC 当前帧已处理完，可以发下一帧。
+
+### 10.8 LCD 不显示先查什么？
+
+**答**：先查电源、对比度、PSB、RST、CS/SCK/SID 接线，再查初始化命令。
+
+### 10.9 位图错位先查什么？
+
+**答**：查 PC 端位图布局是否按 16 字节/行、64 行组织。
+
+### 10.10 本课的主循环负责什么？
+
+**答**：主循环轮询 `frame_ready`，在 payload 接收完成后处理文本或位图，并发送 ACK。
+
+## 11. 工程实现步骤
+
+### 11.1 需求分析
+
+需要从 PC 接收两类帧，并在 LCD 上显示。文本帧追求稳定显示字符，位图帧追求完整像素刷新。
+
+### 11.2 硬件核查
+
+确认 LCD 供电、背光、V0 对比度、PSB=GND、PB0/PB1、PA5/PA7、PA9/PA10 和 GND 共地。
+
+### 11.3 寄存器路线
+
+先配置 72MHz，再配 USART1 921600，再配 SPI1 主机输出，最后在主循环里按帧头、模式、长度收数据并发送预览。
+
+### 11.4 HAL 路线
+
+初始化 SPI、USART、DMA 和 LCD；先用 RXNE 中断接帧头，再用 DMA 接 payload；主循环处理 ready 标志，刷新文本或位图。
+
+### 11.5 工程思维
+
+长 payload 用 DMA，短帧头用中断判断长度；处理完发 ACK，PC 端按 ACK 节流；错误时重新同步帧头。
+
+### 11.6 常见工程陷阱
+
+对比度没调、PSB 接错、CS 极性理解错、ST7920 半字节封包错、位图布局错、DMA 长度错、串口太快但线材差，都会导致“看起来像代码没跑”。
+
+## 12. 运行现象
+
+HAL 版上电后 LCD 显示等待连接的启动画面。PC 发送文本帧后，LCD 显示 4 行文本；发送位图帧后，LCD 刷新 128x64 图像；每处理一帧 PC13 翻转并回发 `0x55`。寄存器版收到合法帧后翻转 PC13、回 ACK，并把前 64 字节走 SPI 预览链路。
+
+### 12.1 六层对应关系
+
+现象层是 LCD 内容、PC13 和 ACK；硬件层是 LCD/USB-TTL/引脚；芯片模块层是 USART1、SPI1、DMA1、GPIO；寄存器层是 SR/DR/BRR/CR1、SPI SR/DR、DMA CCR；C 层是收帧和显示函数；HAL 层是 UART/DMA/SPI handle 与回调。
+
+### 12.2 推荐断点
+
+寄存器版断在收到 mode 后、收完 payload 后、lcd_send_frame_preview 和 usart1_tx ACK。HAL 版断在 USART1_IRQHandler 帧头完成处、HAL_UART_RxCpltCallback、process_text_frame/process_bitmap_frame、frame_ack_send。
+
+### 12.3 PC 端发送注意
+
+PC 端必须严格按固定长度发送。文本不足 64 字节要补空格，位图必须 1024 字节，不能多一个换行符，否则下一帧会错位。
+
+## 13. 常见问题排查
+
+### 13.1 LCD 完全无显示
+
+先查 VDD/GND、背光和 V0 对比度。
+再查 PSB 是否接 GND、RST 是否拉高。
+
+### 13.2 只有背光没有字
+
+对比度可能不对，或者初始化命令没进 LCD。
+用示波器看 PB0/PA5/PA7 是否有波形。
+
+### 13.3 串口无 ACK
+
+查 921600 波特率、TX/RX 交叉、GND 共地、帧头是否 0xAA。
+
+### 13.4 只显示乱码
+
+查文本是否正好 64 字节，字符编码是否 ASCII。
+ST7920 字库不等同现代 UTF-8。
+
+### 13.5 位图错位
+
+查位图数据是否按 16 字节/行、64 行排列。
+HAL 版 GDRAM 上下半屏交错写入。
+
+### 13.6 只能处理第一帧
+
+查 ACK 后是否重置 header_idx，并重新打开 RXNE 中断。
+HAL 版还要确认 DMAStop 和排空 DR。
+
+### 13.7 DMA 回调不进
+
+查 DMA1_Channel5、__HAL_LINKDMA、NVIC 和 payload_size。
+
+### 13.8 寄存器版显示不完整
+
+这是预期边界。寄存器版只发送前 64 字节预览，不实现完整 ST7920 DDRAM/GDRAM 刷新。
+
+### 13.9 高速串口不稳定
+
+降低波特率测试，检查 USB-TTL 质量和线长。
+921600 对接线质量更敏感。
+
+### 13.10 错误后一直错帧
+
+HAL 版靠帧头重同步。
+PC 端也应等待 ACK 后再发送下一帧。
+
+## 14. 本课最核心的结论
+
+1. 12864 LCD 显示不是单个 API，而是串口收帧、SPI 封包、LCD 地址映射的组合。
+2. ST7920 串行模式一个数据字节要拆成 3 个 SPI 字节。
+3. 文本帧 64 字节，位图帧 1024 字节，长度必须严格一致。
+4. HAL 版用帧头中断加 payload DMA，是为了兼顾同步和吞吐。
+5. ACK 0x55 是 PC 与 STM32 的节流边界。
+6. 寄存器版是底层预览链路，不是完整显示刷新。
+7. LCD 无显示优先查硬件和对比度。
+8. 本课应按通信协议、显示控制器和外设驱动链路解释。
+
+## 15. 建议你现在怎么读这节课
+
+先按接线表确认 LCD 硬件，再看第 5 章帧链路。读 HAL 版时重点看 `USART1_IRQHandler()` 怎样从帧头切到 DMA，和 `lcd_write_byte()` 怎样把一个字节封成 ST7920 串行格式。
+
+读寄存器版时只把它当底层对照：USART 能收、SPI 能发、GPIO 能控，不要期待它完成 HAL 版那种完整显示效果。
+
+## 16. 扩展练习
+
+1. 写一个 PC 脚本发送 64 字节文本帧并等待 ACK。
+2. 把 HAL 版启动画面改成自己的四行文本。
+3. 降低串口波特率，比较位图刷新时间。
+4. 给寄存器版补完整 ST7920 三字节封包函数。
+5. 增加帧校验字节，错误时不刷新并返回错误码。
+
+## 17. 下一课预告
+
+- 上一课：[61_small_system_project](../61_small_system_project/README.md)
+- 下一课：本系列到这里完成 62 章基础链路
+### 12.3 源码复盘点 0
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+
+### 12.5 源码复盘点 2
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+
+### 12.6 源码复盘点 3
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+
+### 12.7 源码复盘点 4
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+
+### 12.8 源码复盘点 5
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+
+### 12.10 源码复盘点 7
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+
+### 12.11 源码复盘点 8
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+
+### 12.12 源码复盘点 9
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+
+### 12.13 源码复盘点 10
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+
+### 12.15 源码复盘点 12
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+
+### 12.16 源码复盘点 13
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+
+### 12.17 源码复盘点 14
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+
+### 12.18 源码复盘点 15
+
+复盘时把 `FRAME_HEADER1`、`FRAME_MODE_TEXT`、`FRAME_MODE_BITMAP`、payload 长度、ACK、CS/RST、SPI 发送函数逐项对应到硬件现象。
+任何一个字段错，最终都可能只表现为 LCD 不变或 PC 收不到 ACK。
+

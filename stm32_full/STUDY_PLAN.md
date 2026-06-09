@@ -141,8 +141,8 @@ STM32F103C8T6/
 │       └── src/main.c
 ├── 02_gpio_key/
 ├── 03_clock_tree/
-├── 04_systick/
-├── 05_timer_base/
+├── 05_systick/
+├── 06_timer_base/
 └── ...
 ```
 
@@ -200,12 +200,12 @@ STM32F103C8T6/
    - SYSCLK、HCLK、PCLK1、PCLK2
    - 为什么 F103 常用 72MHz
 
-4. `04_systick`
+4. `05_systick`
    - Cortex-M3 的 SysTick
    - 毫秒节拍
    - 阻塞延时的实现基础
 
-5. `05_timer_base`
+5. `06_timer_base`
    - 定时器时钟
    - PSC、ARR、CNT
    - 更新事件和定时中断
@@ -224,21 +224,21 @@ STM32F103C8T6/
 
 ### 课程安排
 
-6. `06_pwm_basic`
+6. `08_pwm_basic`
    - PWM 输出
    - 频率和占空比计算
    - LED 调光
 
-7. `07_pwm_advanced`
+7. `09_pwm_advanced`
    - 呼吸灯或蜂鸣器
    - 动态更新占空比
 
-8. `08_exti`
+8. `10_exti`
    - 外部中断
    - EXTI 线映射
    - NVIC 基础
 
-9. `09_input_capture`
+9. `11_input_capture`
    - 输入捕获
    - 测频率、测脉宽
 
@@ -255,20 +255,20 @@ STM32F103C8T6/
 
 ### 课程安排
 
-10. `10_adc_polling`
+10. `15_adc_polling`
    - 单通道 ADC
    - 采样时间
    - 转换结果读取
 
-11. `11_adc_interrupt`
+11. `16_adc_interrupt`
    - EOC 中断
    - 定时触发采样
 
-12. `12_dma_basic`
+12. `18_dma_basic`
    - DMA 基本原理
    - 外设到内存、内存到外设
 
-13. `13_adc_dma`
+13. `20_adc_dma`
    - ADC + DMA
    - 环形模式
 
@@ -290,28 +290,28 @@ STM32F103C8T6/
 
 ### 课程安排
 
-14. `14_uart_polling`
+14. `21_uart_polling`
    - UART 基本收发
    - 波特率生成
 
-15. `15_uart_interrupt`
+15. `22_uart_interrupt`
    - 串口接收中断
    - 简单缓冲设计
 
-16. `16_uart_dma`
+16. `23_uart_dma`
    - 串口 DMA 发送或接收
    - 传输完成或空闲中断处理
 
-17. `17_spi_basic`
+17. `30_spi_basic`
    - SPI 主模式
    - CPOL、CPHA
    - 环回测试或简单模块通信
 
-18. `18_i2c_basic`
+18. `26_i2c_basic`
    - 起始、地址、应答、停止
    - EEPROM、OLED 或传感器访问
 
-19. `19_can_basic`
+19. `32_can_basic`
    - CAN 控制器基本工作方式
    - 过滤器配置
    - 报文收发
@@ -330,23 +330,23 @@ STM32F103C8T6/
 
 ### 课程安排
 
-20. `20_nvic_priority`
+20. `33_nvic_priority`
    - 中断优先级分组
    - 多中断协作
 
-21. `21_watchdog_iwdg`
+21. `34_watchdog_iwdg`
    - 独立看门狗
    - 喂狗时序
 
-22. `22_watchdog_wwdg`
+22. `35_watchdog_wwdg`
    - 窗口看门狗
    - 过早/过晚喂狗的区别
 
-23. `23_rtc_basic`
+23. `37_rtc_basic`
    - RTC 基础
    - 备份域
 
-24. `24_low_power_basic`
+24. `39_low_power_sleep`
    - 低功耗基础
    - 睡眠与唤醒
 
@@ -368,22 +368,22 @@ STM32F103C8T6/
 
 ### 课程安排
 
-25. `25_freertos_basic`
+25. `44_freertos_intro_porting`
    - 任务创建
    - Tick 和调度基础
 
-26. `26_freertos_queue`
+26. `50_freertos_queue`
    - 任务间通信
    - 生产者/消费者模型
 
-27. `27_freertos_uart`
+27. `59_freertos_uart`
    - 串口接收任务
    - 队列或流缓冲区
 
-28. `28_freertos_adc_dma`
+28. `60_freertos_adc_dma`
    - ADC + DMA + 任务处理
 
-29. `29_small_system_project`
+29. `61_small_system_project`
    - 将 GPIO、定时器、UART、ADC 和 RTOS 组合成一个小系统
 
 ### 阶段要点

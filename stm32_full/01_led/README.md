@@ -323,7 +323,7 @@ HAL_Delay(500);
 
 对应代码文件：
 
-- [reg/src/main.c](/home/myself/workspace/mcu/stm32/STM32F103C8T6/01_led/reg/src/main.c)
+- [reg/src/main.c](reg/src/main.c)
 
 ### 7.1 先看完整逻辑
 
@@ -390,7 +390,7 @@ GPIOC->CRH |= GPIO_CRH_MODE13_1;
 
 对应代码文件：
 
-- [hal/src/main.c](/home/myself/workspace/mcu/stm32/STM32F103C8T6/01_led/hal/src/main.c)
+- [hal/src/main.c](hal/src/main.c)
 
 ### 8.1 HAL 版和寄存器版本质差异是什么
 

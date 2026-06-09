@@ -1,0 +1,31 @@
+#include "stm32f1xx.h"
+#include "FreeRTOS.h"
+#include "task.h"
+
+static void system_clock_72mhz_init(void)
+{
+    FLASH->ACR = FLASH_ACR_PRFTBE | FLASH_ACR_LATENCY_2;
+    RCC->CR |= RCC_CR_HSEON; while ((RCC->CR & RCC_CR_HSERDY) == 0U) {}
+    RCC->CFGR &= ~(RCC_CFGR_HPRE | RCC_CFGR_PPRE1 | RCC_CFGR_PPRE2 | RCC_CFGR_PLLSRC | RCC_CFGR_PLLXTPRE | RCC_CFGR_PLLMULL | RCC_CFGR_SW);
+    RCC->CFGR |= RCC_CFGR_HPRE_DIV1 | RCC_CFGR_PPRE1_DIV2 | RCC_CFGR_PPRE2_DIV1 | RCC_CFGR_PLLSRC | RCC_CFGR_PLLMULL9;
+    RCC->CR |= RCC_CR_PLLON; while ((RCC->CR & RCC_CR_PLLRDY) == 0U) {}
+    RCC->CFGR |= RCC_CFGR_SW_PLL; while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL) {}
+}
+static void gpio_init(void)
+{
+    RCC->APB2ENR |= RCC_APB2ENR_IOPCEN | RCC_APB2ENR_IOPAEN | RCC_APB2ENR_AFIOEN;
+    GPIOC->CRH &= ~(GPIO_CRH_MODE13 | GPIO_CRH_CNF13); GPIOC->CRH |= GPIO_CRH_MODE13_1; GPIOC->BSRR = GPIO_BSRR_BS13;
+    GPIOA->CRL &= ~(GPIO_CRL_MODE0 | GPIO_CRL_CNF0 | GPIO_CRL_MODE1 | GPIO_CRL_CNF1 | GPIO_CRL_MODE2 | GPIO_CRL_CNF2);
+    GPIOA->CRL |= GPIO_CRL_CNF0_1 | GPIO_CRL_MODE1_1 | GPIO_CRL_MODE2_1; GPIOA->BSRR = GPIO_BSRR_BS0;
+}
+static void led_toggle_pc13(void){ if((GPIOC->ODR & GPIO_ODR_ODR13)!=0U) GPIOC->BRR=GPIO_BRR_BR13; else GPIOC->BSRR=GPIO_BSRR_BS13; }
+static void led_toggle_pa1(void){ if((GPIOA->ODR & GPIO_ODR_ODR1)!=0U) GPIOA->BRR=GPIO_BRR_BR1; else GPIOA->BSRR=GPIO_BSRR_BS1; }
+static void led_toggle_pa2(void){ if((GPIOA->ODR & GPIO_ODR_ODR2)!=0U) GPIOA->BRR=GPIO_BRR_BR2; else GPIOA->BSRR=GPIO_BSRR_BS2; }
+void vApplicationMallocFailedHook(void){ taskDISABLE_INTERRUPTS(); while(1){} }
+void vApplicationStackOverflowHook(TaskHandle_t task, char *task_name){ (void)task; (void)task_name; taskDISABLE_INTERRUPTS(); while(1){} }
+#include "queue.h"
+static QueueHandle_t g_a,g_b; static QueueSetHandle_t g_set;
+static void prod_a(void *arg){ uint8_t v=1; (void)arg; while(1){ xQueueSend(g_a,&v,0); vTaskDelay(pdMS_TO_TICKS(700)); } }
+static void prod_b(void *arg){ uint8_t v=2; (void)arg; while(1){ xQueueSend(g_b,&v,0); vTaskDelay(pdMS_TO_TICKS(1100)); } }
+static void select_task(void *arg){ QueueSetMemberHandle_t active; uint8_t v; (void)arg; while(1){ active=xQueueSelectFromSet(g_set,portMAX_DELAY); if(active==g_a){ xQueueReceive(g_a,&v,0); led_toggle_pc13(); } else if(active==g_b){ xQueueReceive(g_b,&v,0); led_toggle_pa1(); } } }
+int main(void){ system_clock_72mhz_init(); gpio_init(); g_a=xQueueCreate(4,sizeof(uint8_t)); g_b=xQueueCreate(4,sizeof(uint8_t)); g_set=xQueueCreateSet(8); xQueueAddToSet(g_a,g_set); xQueueAddToSet(g_b,g_set); BaseType_t ok=xTaskCreate(prod_a,"pa",128,NULL,1,NULL); ok &= xTaskCreate(prod_b,"pb",128,NULL,1,NULL); ok &= xTaskCreate(select_task,"sel",160,NULL,2,NULL); if(g_a==NULL||g_b==NULL||g_set==NULL||ok!=pdPASS){taskDISABLE_INTERRUPTS();while(1){}} vTaskStartScheduler(); while(1){} }
