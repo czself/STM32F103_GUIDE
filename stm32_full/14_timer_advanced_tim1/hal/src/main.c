@@ -79,8 +79,9 @@ static void tim1_pwm_init(void)
     /*
      * Break/DeadTime 配置对应 TIM1->BDTR。
      *
-     * 本课不启用刹车输入，也不设置死区；但 AutomaticOutput=ENABLE
-     * 会让 HAL 在启动 PWM 时打开高级定时器主输出门 MOE。
+     * 本课不启用刹车输入，也不设置死区。
+     * AutomaticOutput 对应 BDTR.AOE，表示刹车释放后的自动输出策略；
+     * 真正打开主输出门 MOE 的动作由后面的 HAL_TIM_PWM_Start() 完成。
      */
     bd.OffStateRunMode = TIM_OSSR_DISABLE;
     bd.OffStateIDLEMode = TIM_OSSI_DISABLE;
@@ -88,15 +89,15 @@ static void tim1_pwm_init(void)
     bd.DeadTime = 0U;
     bd.BreakState = TIM_BREAK_DISABLE;
     bd.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
-    bd.AutomaticOutput = TIM_AUTOMATICOUTPUT_ENABLE;
+    bd.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
 
     if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &bd) != HAL_OK) {
         error_handler();
     }
 
     /*
-     * 对 TIM1 来说，Start 不只是启动计数和通道，还要让主输出门处于可输出状态。
-     * 如果 BDTR/MOE 这条链路没配置好，PA8 可能仍然没有 PWM。
+     * 对 TIM1 来说，HAL_TIM_PWM_Start() 不只是启动计数和通道。
+     * CubeF1 HAL 会在高级定时器启动 PWM 时设置 MOE，让主输出门打开。
      */
     if (HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1) != HAL_OK) {
         error_handler();

@@ -94,6 +94,19 @@ static void uart_dma_init(void)
      * 能找到该使用哪个 DMA 通道。
      */
     __HAL_LINKDMA(&huart1, hdmatx, hdma_tx);
+
+    /*
+     * HAL_UART_Transmit_DMA() 使用中断回调收尾：
+     * - DMA1_Channel4_IRQHandler 让 HAL 知道 DMA 已经搬完
+     * - USART1_IRQHandler 让 HAL 等最后一个停止位发完后恢复 READY
+     *
+     * 少了这两道中断链，第一轮可能发出去了，但下一轮会因为
+     * huart1 仍处于 BUSY_TX 而启动失败。
+     */
+    HAL_NVIC_SetPriority(DMA1_Channel4_IRQn, 1, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Channel4_IRQn);
+    HAL_NVIC_SetPriority(USART1_IRQn, 1, 1);
+    HAL_NVIC_EnableIRQ(USART1_IRQn);
 }
 
 static void system_clock_72mhz_init(void)
@@ -144,6 +157,16 @@ static void pc13_led_init(void)
 void SysTick_Handler(void)
 {
     HAL_IncTick();
+}
+
+void DMA1_Channel4_IRQHandler(void)
+{
+    HAL_DMA_IRQHandler(&hdma_tx);
+}
+
+void USART1_IRQHandler(void)
+{
+    HAL_UART_IRQHandler(&huart1);
 }
 
 static void error_handler(void)

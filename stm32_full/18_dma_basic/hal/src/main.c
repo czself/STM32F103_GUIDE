@@ -291,9 +291,10 @@ static void dma1_channel1_init(void)
  *   2. 不需要使能 EOCIE（中断）
  *   3. 不需要配置 ADC 的 NVIC
  *
- * 注意：DMA 相关的 NVIC 在 HAL_ADC_Start_DMA 内部配置，
- * 如果使用了 DMA 中断，需要使能 DMA 通道的中断。
- * 但本课最简单的模式不需要 DMA 中断——主循环直接读内存变量即可。
+ * 注意：HAL_ADC_Start_DMA() 会用 DMA 中断回调维护 HAL 内部状态，
+ * 但本课主循环只读持续刷新的内存变量，不依赖 DMA 完成回调做业务逻辑。
+ * 如果后续要在半传输/传输完成回调里处理数据，需要手动配置 DMA NVIC
+ * 并提供对应的 DMA IRQHandler。
  */
 static void adc1_init(void)
 {
