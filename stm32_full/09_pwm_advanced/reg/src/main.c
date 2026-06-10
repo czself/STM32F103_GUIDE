@@ -3,9 +3,13 @@
 /*
  * 本文件是“寄存器版 PWM 进阶”。
  *
- * 目标：
- * 1. 继续使用 TIM2_CH1 在 PA0 输出 1kHz PWM
- * 2. 通过更合理的占空比更新策略，实现更自然的呼吸灯
+ * 08 已经学过 PWM 的基本链路：
+ * PA0 复用输出 -> TIM2_CH1 -> ARR 决定周期 -> CCR1 决定占空比。
+ *
+ * 本课的新重点不是再配一遍 PWM，而是观察“占空比更新策略”：
+ * - 线性地每次加同样的 CCR1，亮度变化会显得生硬
+ * - 分区间选择不同步长，可以让暗部更细腻、高亮区不拖沓
+ * - 到达 0% / 100% 边界时改变方向，形成呼吸灯循环
  *
  * 硬件接法：
  * - PA0 -> 220Ω 电阻 -> LED 正极
@@ -14,6 +18,7 @@
 
 static void delay(volatile uint32_t count)
 {
+    /* 这里只负责放慢呼吸变化；精确延时不是本课重点。 */
     while (count--) {
         __NOP();
     }
@@ -53,6 +58,7 @@ static void system_clock_72mhz_init(void)
 
 static void pa0_pwm_pin_init(void)
 {
+    /* 复用输出链路在 08 已讲过：PA0 要交给 TIM2_CH1 驱动。 */
     RCC->APB2ENR |= RCC_APB2ENR_IOPAEN | RCC_APB2ENR_AFIOEN;
 
     GPIOA->CRL &= ~(GPIO_CRL_MODE0 | GPIO_CRL_CNF0);
@@ -85,12 +91,19 @@ static void tim2_pwm_init(void)
 static uint16_t next_duty(uint16_t duty, int8_t direction)
 {
     /*
-     * 本函数根据当前亮度区间，决定下一步增减多少。
+     * 本函数只处理“下一步占空比是多少”，不直接碰 TIM2->CCR1。
+     *
+     * 这样主循环可以保持清楚：
+     * 1. 把当前 duty 写入 CCR1
+     * 2. 根据边界决定呼吸方向
+     * 3. 算出下一次 duty
      *
      * 设计思路：
-     * - 暗部变化更细：避免刚亮起来时太突兀
-     * - 中间区域变化适中：让整体节奏不要太拖
-     * - 高亮区域可以稍大：因为人眼在高亮区的微小变化不那么明显
+     * - duty 很小时，用 5 的小步长，避免 LED 从全灭突然跳亮
+     * - duty 进入中段后，步长加大，让呼吸节奏不要太慢
+     * - 接近高亮时再收一点，避免到顶端时变化太突然
+     *
+     * 这不是严格的亮度校正算法，只是给初学者看的“非线性更新”示例。
      */
     uint16_t step;
 
@@ -105,6 +118,10 @@ static uint16_t next_duty(uint16_t duty, int8_t direction)
     }
 
     if (direction > 0) {
+        /*
+         * 变亮方向不能超过 ARR+1 对应的满占空比范围。
+         * 本课 ARR = 999，因此把 duty 夹在 1000 以内。
+         */
         if ((uint32_t)duty + step >= 1000U) {
             return 1000U;
         }
@@ -112,6 +129,7 @@ static uint16_t next_duty(uint16_t duty, int8_t direction)
     }
 
     if (duty <= step) {
+        /* 变暗方向到达底部时直接回到 0，避免无符号数下溢。 */
         return 0U;
     }
     return (uint16_t)(duty - step);
@@ -130,6 +148,8 @@ int main(void)
         /*
          * 更新当前 PWM 占空比。
          * TIM2->CCR1 越大，一个周期内高电平越长，LED 越亮。
+         *
+         * 这里每轮只写一次 CCR1，定时器硬件会在后台持续输出 PWM。
          */
         TIM2->CCR1 = duty;
 
@@ -142,6 +162,9 @@ int main(void)
          * 到达边界时改变方向：
          * - 到最亮后开始变暗
          * - 到最暗后开始变亮
+         *
+         * 注意这里先判断边界，再计算下一步 duty，
+         * 可以避免在 0 和 1000 附近来回越界。
          */
         if (duty >= 1000U) {
             direction = -1;
@@ -152,4 +175,3 @@ int main(void)
         duty = next_duty(duty, direction);
     }
 }
-

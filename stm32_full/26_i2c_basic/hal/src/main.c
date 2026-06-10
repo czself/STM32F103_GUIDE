@@ -145,7 +145,9 @@ static void system_clock_72mhz_init(void)
     osc.PLL.PLLSource = RCC_PLLSOURCE_HSE;
     osc.PLL.PLLMUL = RCC_PLL_MUL9;
 
-    if (HAL_RCC_OscConfig(&osc) != HAL_OK) error_handler();
+    if (HAL_RCC_OscConfig(&osc) != HAL_OK) {
+        error_handler();
+    }
 
     clk.ClockType = RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK |
                     RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
@@ -154,7 +156,9 @@ static void system_clock_72mhz_init(void)
     clk.APB1CLKDivider = RCC_HCLK_DIV2;
     clk.APB2CLKDivider = RCC_HCLK_DIV1;
 
-    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK) error_handler();
+    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK) {
+        error_handler();
+    }
 }
 
 static void led_pc13_init(void)

@@ -1,60 +1,97 @@
 #include "stm32f1xx.h"
 
+/*
+ * 寄存器版：TFT LCD 与 FSMC 教学模拟。
+ *
+ * 当前代码没有真实 LCD，也没有配置 FSMC。
+ * g_framebuffer 用来模拟 LCD GRAM，lcd_fill() 模拟整屏填充。
+ */
+
+#define LCD_W 32U
+#define LCD_H 24U
+
+static uint16_t g_framebuffer[LCD_W * LCD_H];
+
 static void system_clock_72mhz_init(void)
 {
-    /* Flash 读指令也需要时间。72MHz 下必须配置 2 个等待周期，否则 CPU 可能取指不稳定。 */
     FLASH->ACR = FLASH_ACR_PRFTBE | FLASH_ACR_LATENCY_2;
-    /* HSE 是板上 8MHz 外部晶振。先等 HSE 稳定，再把它送进 PLL。 */
+
     RCC->CR |= RCC_CR_HSEON;
-    while ((RCC->CR & RCC_CR_HSERDY) == 0U) {}
-    RCC->CFGR &= ~(RCC_CFGR_HPRE | RCC_CFGR_PPRE1 | RCC_CFGR_PPRE2 |
-                   RCC_CFGR_PLLSRC | RCC_CFGR_PLLXTPRE | RCC_CFGR_PLLMULL |
+    while ((RCC->CR & RCC_CR_HSERDY) == 0U) {
+    }
+
+    RCC->CFGR &= ~(RCC_CFGR_HPRE |
+                   RCC_CFGR_PPRE1 |
+                   RCC_CFGR_PPRE2 |
+                   RCC_CFGR_PLLSRC |
+                   RCC_CFGR_PLLXTPRE |
+                   RCC_CFGR_PLLMULL |
                    RCC_CFGR_SW);
-    /* APB1 最高 36MHz，所以 HCLK=72MHz 时 PCLK1 必须二分频。 */
-    RCC->CFGR |= RCC_CFGR_HPRE_DIV1 | RCC_CFGR_PPRE1_DIV2 |
-                 RCC_CFGR_PPRE2_DIV1 | RCC_CFGR_PLLSRC | RCC_CFGR_PLLMULL9;
+
+    RCC->CFGR |= RCC_CFGR_HPRE_DIV1;
+    RCC->CFGR |= RCC_CFGR_PPRE1_DIV2;
+    RCC->CFGR |= RCC_CFGR_PPRE2_DIV1;
+    RCC->CFGR |= RCC_CFGR_PLLSRC;
+    RCC->CFGR |= RCC_CFGR_PLLMULL9;
+
     RCC->CR |= RCC_CR_PLLON;
-    while ((RCC->CR & RCC_CR_PLLRDY) == 0U) {}
+    while ((RCC->CR & RCC_CR_PLLRDY) == 0U) {
+    }
+
     RCC->CFGR |= RCC_CFGR_SW_PLL;
-    while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL) {}
+    while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL) {
+    }
 }
 
 static void pc13_led_init(void)
 {
-    /* GPIOC 在 APB2 总线上。不开 IOPCEN，PC13 的模式寄存器不会真正驱动硬件。 */
     RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;
-    /* PC13 属于 8~15 号引脚，所以配置 CRH；先清 MODE/CNF，避免旧模式残留。 */
+
     GPIOC->CRH &= ~(GPIO_CRH_MODE13 | GPIO_CRH_CNF13);
-    /* MODE13=10 表示 2MHz 输出，CNF13=00 表示通用推挽输出。 */
     GPIOC->CRH |= GPIO_CRH_MODE13_1;
-    /* BluePill 的 PC13 LED 通常低电平亮，初始化先输出高电平让它熄灭。 */
+
     GPIOC->BSRR = GPIO_BSRR_BS13;
 }
 
 static void pc13_toggle(void)
 {
-    if ((GPIOC->ODR & GPIO_ODR_ODR13) != 0U) GPIOC->BRR = GPIO_BRR_BR13;
-    else GPIOC->BSRR = GPIO_BSRR_BS13;
+    if ((GPIOC->ODR & GPIO_ODR_ODR13) != 0U) {
+        GPIOC->BRR = GPIO_BRR_BR13;
+    } else {
+        GPIOC->BSRR = GPIO_BSRR_BS13;
+    }
 }
 
 static void delay_cycles(volatile uint32_t cycles)
 {
-    while (cycles-- != 0U) { __NOP(); }
+    while (cycles-- != 0U) {
+        __NOP();
+    }
 }
 
-#define LCD_W 32U
-#define LCD_H 24U
-static uint16_t g_framebuffer[LCD_W * LCD_H];
-static void lcd_fill(uint16_t color){ for(uint32_t i=0;i<LCD_W*LCD_H;i++) g_framebuffer[i]=color; }
-static void app_init(void){ lcd_fill(0xF800U); }
+static void lcd_fill(uint16_t color)
+{
+    for (uint32_t pixel = 0U; pixel < (LCD_W * LCD_H); pixel++) {
+        g_framebuffer[pixel] = color;
+    }
+}
 
 int main(void)
 {
     system_clock_72mhz_init();
     pc13_led_init();
-    app_init();
+    lcd_fill(0xF800U);
+
     while (1) {
-        lcd_fill((GPIOC->ODR & GPIO_ODR_ODR13) ? 0x07E0U : 0x001FU);
+        uint16_t next_color;
+
+        if ((GPIOC->ODR & GPIO_ODR_ODR13) != 0U) {
+            next_color = 0x07E0U;
+        } else {
+            next_color = 0x001FU;
+        }
+
+        lcd_fill(next_color);
         pc13_toggle();
         delay_cycles(3600000U);
     }

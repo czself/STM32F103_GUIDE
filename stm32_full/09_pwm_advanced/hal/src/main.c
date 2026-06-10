@@ -3,10 +3,11 @@
 /*
  * 本文件是“HAL版 PWM 进阶”。
  *
- * 目标：
- * 1. 继续使用 TIM2_CH1 在 PA0 输出 PWM
- * 2. 通过分段步进策略动态修改占空比
- * 3. 实现更自然的呼吸灯
+ * 08 已经学过 HAL 怎样配置 TIM2_CH1 PWM。
+ * 本课的新重点是“占空比更新策略”：
+ * - 继续用 __HAL_TIM_SET_COMPARE() 改 CCR1
+ * - 但 duty 不再简单线性递增
+ * - 而是按亮度区间选择不同步长，让呼吸灯更自然
  */
 
 static TIM_HandleTypeDef htim2;
@@ -36,7 +37,7 @@ int main(void)
     while (1) {
         /*
          * 通过 HAL 宏修改当前比较值。
-         * 它本质上还是在改 CCR1。
+         * 它本质上还是在改 CCR1；PWM 输出本身继续由 TIM2_CH1 硬件完成。
          */
         __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, duty);
 
@@ -100,6 +101,7 @@ static void gpio_pa0_pwm_init(void)
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
 
+    /* PA0 仍然作为 TIM2_CH1 复用推挽输出；这部分沿用 08 的 PWM 基础。 */
     gpio.Pin = GPIO_PIN_0;
     gpio.Mode = GPIO_MODE_AF_PP;
     gpio.Pull = GPIO_NOPULL;
@@ -114,6 +116,11 @@ static void tim2_pwm_init(void)
     __HAL_RCC_TIM2_CLK_ENABLE();
 
     htim2.Instance = TIM2;
+
+    /*
+     * 继续沿用 08 的 1kHz PWM 参数：
+     * 72MHz / 72 = 1MHz，1MHz / 1000 = 1kHz。
+     */
     htim2.Init.Prescaler = 72U - 1U;
     htim2.Init.Period = 1000U - 1U;
     htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
@@ -124,6 +131,10 @@ static void tim2_pwm_init(void)
         error_handler();
     }
 
+    /*
+     * PWM1 + 初始 Pulse=0：
+     * 让 LED 从全灭附近开始，再由主循环逐步提高 CCR1。
+     */
     sConfigOC.OCMode = TIM_OCMODE_PWM1;
     sConfigOC.Pulse = 0U;
     sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
@@ -138,6 +149,13 @@ static uint32_t next_duty(uint32_t duty, int8_t direction)
 {
     uint32_t step;
 
+    /*
+     * 这里故意不使用固定步长。
+     *
+     * 暗部用小步长，避免一开始突然变亮；
+     * 中段用较大步长，让呼吸节奏不要拖；
+     * 高亮附近再放慢一点，让到顶端的过渡更柔和。
+     */
     if (duty < 120U) {
         step = 5U;
     } else if (duty < 400U) {
@@ -149,6 +167,7 @@ static uint32_t next_duty(uint32_t duty, int8_t direction)
     }
 
     if (direction > 0) {
+        /* 变亮方向夹到 1000，和 Period=999 对应的满占空比范围保持一致。 */
         if (duty + step >= 1000U) {
             return 1000U;
         }
@@ -156,6 +175,7 @@ static uint32_t next_duty(uint32_t duty, int8_t direction)
     }
 
     if (duty <= step) {
+        /* 变暗方向夹到 0，避免 uint32_t 下溢成很大的数。 */
         return 0U;
     }
     return duty - step;
@@ -163,6 +183,7 @@ static uint32_t next_duty(uint32_t duty, int8_t direction)
 
 void SysTick_Handler(void)
 {
+    /* 主循环使用 HAL_Delay() 控制呼吸节奏，因此需要维护 HAL tick。 */
     HAL_IncTick();
 }
 

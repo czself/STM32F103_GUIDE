@@ -27,6 +27,7 @@ static void gpio_init(void);
 static void iwdg_init(void);
 static uint8_t key_pressed(void);
 static void led_blink(uint32_t times);
+static void error_handler(void);
 
 int main(void)
 {
@@ -56,7 +57,9 @@ int main(void)
              * HAL_IWDG_Refresh() 底层写 IWDG->KR = 0xAAAA
              * 重装计数器，防止 IWDG 超时复位
              */
-            HAL_IWDG_Refresh(&hiwdg);
+            if (HAL_IWDG_Refresh(&hiwdg) != HAL_OK) {
+                error_handler();
+            }
             led_blink(1U);
         } else {
             HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);  /* LED 亮 */
@@ -108,7 +111,9 @@ static void iwdg_init(void)
     hiwdg.Instance = IWDG;
     hiwdg.Init.Prescaler = IWDG_PRESCALER_32;  /* 预分频 32 */
     hiwdg.Init.Reload = 2500U;                  /* 重装值 2500 */
-    HAL_IWDG_Init(&hiwdg);                      /* 解锁→配置→启动 */
+    if (HAL_IWDG_Init(&hiwdg) != HAL_OK) {      /* 解锁→配置→启动 */
+        error_handler();
+    }
 }
 
 static uint8_t key_pressed(void)
@@ -133,4 +138,15 @@ static void led_blink(uint32_t times)
 void SysTick_Handler(void)
 {
     HAL_IncTick();
+}
+
+static void error_handler(void)
+{
+    /*
+     * IWDG 相关 HAL 调用失败，说明看门狗没有按课程预期配置或刷新。
+     * 关中断停住，避免继续运行给出错误的“看门狗正常”现象。
+     */
+    __disable_irq();
+    while (1) {
+    }
 }

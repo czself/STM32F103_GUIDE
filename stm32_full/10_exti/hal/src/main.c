@@ -79,8 +79,10 @@ static void key_pa0_exti_init(void)
 
     /*
      * 打开 GPIOA 时钟。
+     * AFIO 负责把 EXTI0 映射到 PA0，F1 的 EXTI 端口选择离不开它。
      */
     __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_AFIO_CLK_ENABLE();
 
     /*
      * GPIO_MODE_IT_FALLING 表示：
@@ -120,6 +122,15 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     if (GPIO_Pin == GPIO_PIN_0) {
         HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
     }
+}
+
+void SysTick_Handler(void)
+{
+    /*
+     * HAL_Init() 会配置 SysTick。这里维护 HAL tick，
+     * 避免最小工程的 SysTick 中断落到默认处理函数。
+     */
+    HAL_IncTick();
 }
 
 static void error_handler(void)

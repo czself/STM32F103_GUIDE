@@ -27,6 +27,7 @@ static void gpio_init(void);
 static void wwdg_init(void);
 static uint8_t key_pressed(void);
 static void led_blink(uint32_t times);
+static void error_handler(void);
 
 int main(void)
 {
@@ -62,7 +63,9 @@ int main(void)
             while ((WWDG->CR & WWDG_CR_T) > 0x50U) {
                 /* 等待计数器从 0x7F 递减到 ≤ 0x50 */
             }
-            HAL_WWDG_Refresh(&hwwdg);  /* 在窗口内合法刷新 */
+            if (HAL_WWDG_Refresh(&hwwdg) != HAL_OK) {  /* 在窗口内合法刷新 */
+                error_handler();
+            }
             led_blink(1U);
         } else {
             HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_RESET);  /* LED 亮 */
@@ -113,7 +116,9 @@ static void wwdg_init(void)
     hwwdg.Init.Window = 0x50U;                 /* 窗口值 0x50 */
     hwwdg.Init.Counter = 0x7FU;                /* 初始计数器 0x7F */
     hwwdg.Init.EWIMode = WWDG_EWI_DISABLE;    /* 不使用 EWI 中断 */
-    HAL_WWDG_Init(&hwwdg);                     /* 配置并启动 */
+    if (HAL_WWDG_Init(&hwwdg) != HAL_OK) {     /* 配置并启动 */
+        error_handler();
+    }
 }
 
 static uint8_t key_pressed(void)
@@ -134,4 +139,15 @@ static void led_blink(uint32_t times)
 void SysTick_Handler(void)
 {
     HAL_IncTick();
+}
+
+static void error_handler(void)
+{
+    /*
+     * WWDG 初始化或窗口内刷新失败时，继续跑会掩盖真正问题。
+     * 停在这里方便调试器查看 hwwdg 和 WWDG->CR/CFR。
+     */
+    __disable_irq();
+    while (1) {
+    }
 }

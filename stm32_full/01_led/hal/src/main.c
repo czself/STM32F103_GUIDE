@@ -140,12 +140,6 @@ static void gpio_pc13_init(void)
      */
     HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, GPIO_PIN_SET);
 }
-
-
-
-
-
-
 void SysTick_Handler(void)
 {
     /*
@@ -160,11 +154,4 @@ void SysTick_Handler(void)
      * - 如果点灯，可能表现成“常亮”或“常灭”
      */
     HAL_IncTick();
-}
-
-static void error_handler(void)
-{
-    __disable_irq();
-    while (1) {
-    }
 }

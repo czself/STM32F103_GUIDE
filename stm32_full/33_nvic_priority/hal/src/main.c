@@ -178,7 +178,15 @@ static void tim2_init(void)
     htim2.Init.Period = 20000U - 1U;             /* ARR 值 */
     htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;  /* TDTS = Tck_tim */
     htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE; /* 立即生效 */
-    HAL_TIM_Base_Init(&htim2);  /* 调用后内部写 PSC/ARR 等寄存器 */
+    /*
+     * HAL_TIM_Base_Init() 调用后内部写 PSC/ARR/CR1 等寄存器。
+     * 如果这里失败，后面的 HAL_TIM_Base_Start_IT() 即使被调用，
+     * 也没有可靠的定时器配置可用，所以必须停下来调试。
+     */
+    if (HAL_TIM_Base_Init(&htim2) != HAL_OK) {
+        while (1) {
+        }
+    }
 
     /*
      * TIM2 优先级设为 2，低于 EXTI0（优先级 0）
@@ -314,7 +322,10 @@ static void system_clock_72mhz_init(void)
     osc.PLL.PLLState = RCC_PLL_ON;                   /* 使能 PLL */
     osc.PLL.PLLSource = RCC_PLLSOURCE_HSE;           /* PLL 输入源选择 HSE */
     osc.PLL.PLLMUL = RCC_PLL_MUL9;                   /* PLL 倍频：×9 → 72MHz */
-    HAL_RCC_OscConfig(&osc);                         /* 写入寄存器 */
+    if (HAL_RCC_OscConfig(&osc) != HAL_OK) {
+        while (1) {
+        }
+    }
 
     /* 配置系统时钟和总线分频 */
     clk.ClockType = RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK |
@@ -323,5 +334,8 @@ static void system_clock_72mhz_init(void)
     clk.AHBCLKDivider = RCC_SYSCLK_DIV1;             /* AHB 不分频 → HCLK = 72MHz */
     clk.APB1CLKDivider = RCC_HCLK_DIV2;              /* APB1 二分频 → PCLK1 = 36MHz */
     clk.APB2CLKDivider = RCC_HCLK_DIV1;              /* APB2 不分频 → PCLK2 = 72MHz */
-    HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2);      /* 写入寄存器，同时配置 Flash 等待周期 */
+    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK) {
+        while (1) {
+        }
+    }
 }

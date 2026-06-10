@@ -256,7 +256,7 @@ Cortex-M3 内核发出地址访问
 ```c
 system_clock_72mhz_init();
 pc13_led_init();
-app_init();
+memory_map_sample_init();
 while (1) {
     g_sram_counter++;
     pc13_toggle();
@@ -264,7 +264,7 @@ while (1) {
 }
 ```
 
-`app_init()` 是本课核心，它把内核寄存器和基地址宏保存到 SRAM 变量里，方便调试器观察。
+`memory_map_sample_init()` 是本课核心，它把内核寄存器和基地址宏保存到 SRAM 变量里，方便调试器观察。
 
 ### 7.2 `g_debug_words[]` 为什么是全局 `volatile`
 
@@ -433,7 +433,7 @@ HAL 版告诉你：即使用 API，底层仍然绕不开这些地址。
 
 - PC13 周期闪烁。
 - 调试器 Watch 窗口能看到 `g_debug_words[]` 中保存的 CPUID 和基地址。
-- `g_sram_counter` 持续递增。
+- 寄存器版里 `g_sram_counter` 持续递增；HAL 版主要观察 `g_debug_words[]` 和 PC13 闪烁。
 
 ## 13. 常见问题排查
 

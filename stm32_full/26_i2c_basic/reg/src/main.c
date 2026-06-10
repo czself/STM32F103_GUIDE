@@ -443,10 +443,14 @@ static uint8_t i2c1_send_address(uint8_t address_byte)
 static uint8_t at24c02_write_byte(uint8_t mem_addr, uint8_t data_byte)
 {
     /* 等待总线空闲 */
-    if (i2c1_wait_bus_free() == 0U) return 0U;
+    if (i2c1_wait_bus_free() == 0U) {
+        return 0U;
+    }
 
     /* 发送 START */
-    if (i2c1_send_start() == 0U) return 0U;
+    if (i2c1_send_start() == 0U) {
+        return 0U;
+    }
 
     /* 发送器件地址 + 写位（0xA0） */
     if (i2c1_send_address(AT24C02_ADDR_WRITE) == 0U) {
@@ -513,14 +517,20 @@ static uint8_t at24c02_write_byte(uint8_t mem_addr, uint8_t data_byte)
  */
 static uint8_t at24c02_read_byte(uint8_t mem_addr, uint8_t *data_byte)
 {
-    if (data_byte == 0) return 0U;
+    if (data_byte == 0) {
+        return 0U;
+    }
 
     /* ====== 第 1 段：写内存地址 ====== */
-    if (i2c1_wait_bus_free() == 0U) return 0U;
+    if (i2c1_wait_bus_free() == 0U) {
+        return 0U;
+    }
 
     I2C1->CR1 |= I2C_CR1_ACK;
 
-    if (i2c1_send_start() == 0U) return 0U;
+    if (i2c1_send_start() == 0U) {
+        return 0U;
+    }
 
     if (i2c1_send_address(AT24C02_ADDR_WRITE) == 0U) {
         i2c1_send_stop();
@@ -550,7 +560,9 @@ static uint8_t at24c02_read_byte(uint8_t mem_addr, uint8_t *data_byte)
      *   软件上：再次设置 CR1.START = 1（I2C 硬件知道当前在通信中，
      *   会自动产生 RESTART 而不是普通的 START）。
      */
-    if (i2c1_send_start() == 0U) return 0U;
+    if (i2c1_send_start() == 0U) {
+        return 0U;
+    }
 
     if (i2c1_send_address(AT24C02_ADDR_READ) == 0U) {
         i2c1_send_stop();

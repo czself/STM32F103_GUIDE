@@ -96,7 +96,9 @@ static void system_clock_72mhz_init(void)
     osc.PLL.PLLSource = RCC_PLLSOURCE_HSE;
     osc.PLL.PLLMUL = RCC_PLL_MUL9;
 
-    if (HAL_RCC_OscConfig(&osc) != HAL_OK) error_handler();
+    if (HAL_RCC_OscConfig(&osc) != HAL_OK) {
+        error_handler();
+    }
 
     clk.ClockType = RCC_CLOCKTYPE_SYSCLK |
                     RCC_CLOCKTYPE_HCLK |
@@ -107,7 +109,9 @@ static void system_clock_72mhz_init(void)
     clk.APB1CLKDivider = RCC_HCLK_DIV2;
     clk.APB2CLKDivider = RCC_HCLK_DIV1;
 
-    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK) error_handler();
+    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK) {
+        error_handler();
+    }
 }
 
 static void led_pc13_init(void)
@@ -163,7 +167,9 @@ static void dma1_channel1_init(void)
     hdma_adc1.Init.Mode = DMA_CIRCULAR;
     hdma_adc1.Init.Priority = DMA_PRIORITY_HIGH;
 
-    if (HAL_DMA_Init(&hdma_adc1) != HAL_OK) error_handler();
+    if (HAL_DMA_Init(&hdma_adc1) != HAL_OK) {
+        error_handler();
+    }
 
     __HAL_LINKDMA(&hadc1, DMA_Handle, hdma_adc1);
 }
@@ -188,15 +194,21 @@ static void adc1_init(void)
     hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
     hadc1.Init.NbrOfConversion = 1;
 
-    if (HAL_ADC_Init(&hadc1) != HAL_OK) error_handler();
+    if (HAL_ADC_Init(&hadc1) != HAL_OK) {
+        error_handler();
+    }
 
-    if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK) error_handler();
+    if (HAL_ADCEx_Calibration_Start(&hadc1) != HAL_OK) {
+        error_handler();
+    }
 
     sConfig.Channel = ADC_CHANNEL_1;
     sConfig.Rank = ADC_REGULAR_RANK_1;
     sConfig.SamplingTime = ADC_SAMPLETIME_239CYCLES_5;
 
-    if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) error_handler();
+    if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK) {
+        error_handler();
+    }
 }
 
 /*
@@ -221,4 +233,9 @@ static void error_handler(void)
     __disable_irq();
     while (1) {
     }
+}
+
+void SysTick_Handler(void)
+{
+    HAL_IncTick();
 }

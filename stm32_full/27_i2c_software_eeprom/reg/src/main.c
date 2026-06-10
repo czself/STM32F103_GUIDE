@@ -1,60 +1,205 @@
 #include "stm32f1xx.h"
 
+/*
+ * 寄存器版：软件 I2C 写 EEPROM。
+ *
+ * 26 已经讲过硬件 I2C1 的 START/ADDR/TXE/BTF。
+ * 本课的新重点是：不用 I2C 外设，只用 GPIO 手工制造 SCL/SDA 时序。
+ *
+ * 当前代码只演示写序列：
+ * START -> 0xA0 -> 0x00 -> 0x5A -> STOP
+ *
+ * 注意边界：这里没有读取 ACK，也没有读回校验。
+ * PC13 翻转只能说明程序持续输出波形，不能单独证明 EEPROM 一定写成功。
+ */
+
+#define SCL_PIN_MASK GPIO_BSRR_BS6
+#define SDA_PIN_MASK GPIO_BSRR_BS7
+
 static void system_clock_72mhz_init(void)
 {
-    /* Flash 读指令也需要时间。72MHz 下必须配置 2 个等待周期，否则 CPU 可能取指不稳定。 */
     FLASH->ACR = FLASH_ACR_PRFTBE | FLASH_ACR_LATENCY_2;
-    /* HSE 是板上 8MHz 外部晶振。先等 HSE 稳定，再把它送进 PLL。 */
+
     RCC->CR |= RCC_CR_HSEON;
-    while ((RCC->CR & RCC_CR_HSERDY) == 0U) {}
-    RCC->CFGR &= ~(RCC_CFGR_HPRE | RCC_CFGR_PPRE1 | RCC_CFGR_PPRE2 |
-                   RCC_CFGR_PLLSRC | RCC_CFGR_PLLXTPRE | RCC_CFGR_PLLMULL |
+    while ((RCC->CR & RCC_CR_HSERDY) == 0U) {
+    }
+
+    RCC->CFGR &= ~(RCC_CFGR_HPRE |
+                   RCC_CFGR_PPRE1 |
+                   RCC_CFGR_PPRE2 |
+                   RCC_CFGR_PLLSRC |
+                   RCC_CFGR_PLLXTPRE |
+                   RCC_CFGR_PLLMULL |
                    RCC_CFGR_SW);
-    /* APB1 最高 36MHz，所以 HCLK=72MHz 时 PCLK1 必须二分频。 */
-    RCC->CFGR |= RCC_CFGR_HPRE_DIV1 | RCC_CFGR_PPRE1_DIV2 |
-                 RCC_CFGR_PPRE2_DIV1 | RCC_CFGR_PLLSRC | RCC_CFGR_PLLMULL9;
+
+    RCC->CFGR |= RCC_CFGR_HPRE_DIV1;
+    RCC->CFGR |= RCC_CFGR_PPRE1_DIV2;
+    RCC->CFGR |= RCC_CFGR_PPRE2_DIV1;
+    RCC->CFGR |= RCC_CFGR_PLLSRC;
+    RCC->CFGR |= RCC_CFGR_PLLMULL9;
+
     RCC->CR |= RCC_CR_PLLON;
-    while ((RCC->CR & RCC_CR_PLLRDY) == 0U) {}
+    while ((RCC->CR & RCC_CR_PLLRDY) == 0U) {
+    }
+
     RCC->CFGR |= RCC_CFGR_SW_PLL;
-    while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL) {}
+    while ((RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL) {
+    }
 }
 
 static void pc13_led_init(void)
 {
-    /* GPIOC 在 APB2 总线上。不开 IOPCEN，PC13 的模式寄存器不会真正驱动硬件。 */
     RCC->APB2ENR |= RCC_APB2ENR_IOPCEN;
-    /* PC13 属于 8~15 号引脚，所以配置 CRH；先清 MODE/CNF，避免旧模式残留。 */
+
     GPIOC->CRH &= ~(GPIO_CRH_MODE13 | GPIO_CRH_CNF13);
-    /* MODE13=10 表示 2MHz 输出，CNF13=00 表示通用推挽输出。 */
     GPIOC->CRH |= GPIO_CRH_MODE13_1;
-    /* BluePill 的 PC13 LED 通常低电平亮，初始化先输出高电平让它熄灭。 */
+
     GPIOC->BSRR = GPIO_BSRR_BS13;
 }
 
 static void pc13_toggle(void)
 {
-    if ((GPIOC->ODR & GPIO_ODR_ODR13) != 0U) GPIOC->BRR = GPIO_BRR_BR13;
-    else GPIOC->BSRR = GPIO_BSRR_BS13;
+    if ((GPIOC->ODR & GPIO_ODR_ODR13) != 0U) {
+        GPIOC->BRR = GPIO_BRR_BR13;
+    } else {
+        GPIOC->BSRR = GPIO_BSRR_BS13;
+    }
 }
 
 static void delay_cycles(volatile uint32_t cycles)
 {
-    while (cycles-- != 0U) { __NOP(); }
+    while (cycles-- != 0U) {
+        __NOP();
+    }
 }
 
-#define SDA_HIGH() (GPIOB->BSRR = GPIO_BSRR_BS7)
-#define SDA_LOW()  (GPIOB->BRR = GPIO_BRR_BR7)
-#define SCL_HIGH() (GPIOB->BSRR = GPIO_BSRR_BS6)
-#define SCL_LOW()  (GPIOB->BRR = GPIO_BRR_BR6)
-static void soft_i2c_delay(void){ delay_cycles(120U); }
-static void app_init(void)
+static void soft_i2c_delay(void)
+{
+    delay_cycles(120U);
+}
+
+static void scl_release(void)
+{
+    GPIOB->BSRR = SCL_PIN_MASK;
+}
+
+static void scl_low(void)
+{
+    GPIOB->BRR = GPIO_BRR_BR6;
+}
+
+static void sda_release(void)
+{
+    GPIOB->BSRR = SDA_PIN_MASK;
+}
+
+static void sda_low(void)
+{
+    GPIOB->BRR = GPIO_BRR_BR7;
+}
+
+static void soft_i2c_gpio_init(void)
 {
     RCC->APB2ENR |= RCC_APB2ENR_IOPBEN;
-    GPIOB->CRL &= ~(GPIO_CRL_MODE6|GPIO_CRL_CNF6|GPIO_CRL_MODE7|GPIO_CRL_CNF7);
-    GPIOB->CRL |= GPIO_CRL_MODE6|GPIO_CRL_CNF6|GPIO_CRL_MODE7|GPIO_CRL_CNF7; /* 50MHz 开漏输出，释放总线时由上拉拉高。 */
-    SDA_HIGH(); SCL_HIGH();
+
+    /*
+     * PB6/PB7 配成开漏输出。
+     * 软件 I2C 的“输出高”不是强推高，而是释放总线，由上拉电阻拉高。
+     */
+    GPIOB->CRL &= ~(GPIO_CRL_MODE6 |
+                    GPIO_CRL_CNF6 |
+                    GPIO_CRL_MODE7 |
+                    GPIO_CRL_CNF7);
+
+    GPIOB->CRL |= GPIO_CRL_MODE6;
+    GPIOB->CRL |= GPIO_CRL_CNF6;
+    GPIOB->CRL |= GPIO_CRL_MODE7;
+    GPIOB->CRL |= GPIO_CRL_CNF7;
+
+    sda_release();
+    scl_release();
 }
-static void i2c_start(void){ SDA_HIGH(); SCL_HIGH(); soft_i2c_delay(); SDA_LOW(); soft_i2c_delay(); SCL_LOW(); }
-static void i2c_stop(void){ SDA_LOW(); SCL_HIGH(); soft_i2c_delay(); SDA_HIGH(); soft_i2c_delay(); }
-static void i2c_write_byte(uint8_t b){ for(uint8_t i=0;i<8;i++){ if(b&0x80U) SDA_HIGH(); else SDA_LOW(); SCL_HIGH(); soft_i2c_delay(); SCL_LOW(); b<<=1; } SDA_HIGH(); SCL_HIGH(); soft_i2c_delay(); SCL_LOW(); }
-int main(void){ system_clock_72mhz_init(); pc13_led_init(); app_init(); while(1){ i2c_start(); i2c_write_byte(0xA0U); i2c_write_byte(0x00U); i2c_write_byte(0x5AU); i2c_stop(); pc13_toggle(); delay_cycles(7200000U); } }
+
+static void i2c_start(void)
+{
+    /*
+     * START：SCL 为高时，SDA 从高变低。
+     */
+    sda_release();
+    scl_release();
+    soft_i2c_delay();
+
+    sda_low();
+    soft_i2c_delay();
+
+    scl_low();
+}
+
+static void i2c_stop(void)
+{
+    /*
+     * STOP：SCL 为高时，SDA 从低变高。
+     */
+    sda_low();
+    scl_release();
+    soft_i2c_delay();
+
+    sda_release();
+    soft_i2c_delay();
+}
+
+static void i2c_write_bit(uint8_t bit_is_one)
+{
+    /*
+     * I2C 写 bit 的顺序：
+     * 1. SCL 低时准备 SDA
+     * 2. 拉高 SCL，让从机采样这一位
+     * 3. 再拉低 SCL，准备下一位
+     */
+    if (bit_is_one != 0U) {
+        sda_release();
+    } else {
+        sda_low();
+    }
+
+    soft_i2c_delay();
+    scl_release();
+    soft_i2c_delay();
+    scl_low();
+}
+
+static void i2c_write_byte(uint8_t byte)
+{
+    for (uint8_t bit = 0U; bit < 8U; bit++) {
+        i2c_write_bit((byte & 0x80U) != 0U);
+        byte <<= 1;
+    }
+
+    /*
+     * 第 9 个时钟本应读取 ACK。
+     * 本课为了保持最小写波形，只释放 SDA 并给出 ACK 时钟，不判断从机是否拉低。
+     */
+    sda_release();
+    soft_i2c_delay();
+    scl_release();
+    soft_i2c_delay();
+    scl_low();
+}
+
+int main(void)
+{
+    system_clock_72mhz_init();
+    pc13_led_init();
+    soft_i2c_gpio_init();
+
+    while (1) {
+        i2c_start();
+        i2c_write_byte(0xA0U);
+        i2c_write_byte(0x00U);
+        i2c_write_byte(0x5AU);
+        i2c_stop();
+
+        pc13_toggle();
+        delay_cycles(7200000U);
+    }
+}

@@ -25,6 +25,7 @@ static RTC_HandleTypeDef hrtc;  /* RTC 句柄 */
 static void gpio_init(void);
 static void rtc_init(void);
 static void led_toggle(void);
+static void error_handler(void);
 
 int main(void)
 {
@@ -44,11 +45,16 @@ int main(void)
      * RTC_FORMAT_BIN 表示返回二进制格式（而不是 BCD）
      * 返回的 time.Seconds 是当前秒数（0~59）
      */
-    HAL_RTC_GetTime(&hrtc, &time, RTC_FORMAT_BIN);
+    if (HAL_RTC_GetTime(&hrtc, &time, RTC_FORMAT_BIN) != HAL_OK) {
+        error_handler();
+    }
     last_sec = time.Seconds;
 
     while (1) {
-        HAL_RTC_GetTime(&hrtc, &time, RTC_FORMAT_BIN);
+        if (HAL_RTC_GetTime(&hrtc, &time, RTC_FORMAT_BIN) != HAL_OK) {
+            error_handler();
+        }
+
         if (time.Seconds != last_sec) {
             /*
              * 秒值变化 → LED 翻转
@@ -95,12 +101,16 @@ static void rtc_init(void)
     osc.OscillatorType = RCC_OSCILLATORTYPE_LSI;
     osc.LSIState = RCC_LSI_ON;
     osc.PLL.PLLState = RCC_PLL_NONE;  /* LSI 配置不影响 PLL，设为 NONE 跳过 */
-    HAL_RCC_OscConfig(&osc);
+    if (HAL_RCC_OscConfig(&osc) != HAL_OK) {
+        error_handler();
+    }
 
     /* 选择 LSI 作为 RTC 时钟源 */
     periph.PeriphClockSelection = RCC_PERIPHCLK_RTC;
     periph.RTCClockSelection = RCC_RTCCLKSOURCE_LSI;
-    HAL_RCCEx_PeriphCLKConfig(&periph);
+    if (HAL_RCCEx_PeriphCLKConfig(&periph) != HAL_OK) {
+        error_handler();
+    }
     __HAL_RCC_RTC_ENABLE();
 
     /*
@@ -111,7 +121,9 @@ static void rtc_init(void)
     hrtc.Instance = RTC;
     hrtc.Init.AsynchPrediv = 40000U - 1U;
     hrtc.Init.OutPut = RTC_OUTPUTSOURCE_NONE;
-    HAL_RTC_Init(&hrtc);
+    if (HAL_RTC_Init(&hrtc) != HAL_OK) {
+        error_handler();
+    }
 }
 
 static void led_toggle(void)
@@ -122,4 +134,15 @@ static void led_toggle(void)
 void SysTick_Handler(void)
 {
     HAL_IncTick();
+}
+
+static void error_handler(void)
+{
+    /*
+     * RTC 依赖备份域权限、LSI 启动、RTC 时钟源选择和寄存器同步。
+     * 任一 HAL 调用失败都说明链路没有按本课预期建立，停住比继续闪灯更真实。
+     */
+    __disable_irq();
+    while (1) {
+    }
 }

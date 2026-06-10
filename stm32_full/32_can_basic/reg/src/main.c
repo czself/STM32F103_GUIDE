@@ -109,12 +109,23 @@ static void led_pc13_init(void)
     GPIOC->BSRR = GPIO_BSRR_BS13;
 }
 
-static void led_on(void) { GPIOC->BRR = GPIO_BRR_BR13; }
-static void led_off(void) { GPIOC->BSRR = GPIO_BSRR_BS13; }
+static void led_on(void)
+{
+    GPIOC->BRR = GPIO_BRR_BR13;
+}
+
+static void led_off(void)
+{
+    GPIOC->BSRR = GPIO_BSRR_BS13;
+}
+
 static void led_toggle(void)
 {
-    if ((GPIOC->ODR & GPIO_ODR_ODR13) != 0U) { led_on(); }
-    else { led_off(); }
+    if ((GPIOC->ODR & GPIO_ODR_ODR13) != 0U) {
+        led_on();
+    } else {
+        led_off();
+    }
 }
 
 /*
@@ -356,7 +367,9 @@ static uint8_t can1_send_std_data(uint16_t std_id, const uint8_t *data, uint8_t 
     uint32_t timeout = CAN_TIMEOUT_COUNT;
     uint32_t tir;
 
-    if ((data == 0) || (len > 8U)) return 0U;
+    if ((data == 0) || (len == 0U) || (len > 8U)) {
+        return 0U;
+    }
 
     /*
      * 等待邮箱 0 空闲
@@ -365,7 +378,9 @@ static uint8_t can1_send_std_data(uint16_t std_id, const uint8_t *data, uint8_t 
     while (((CAN1->TSR & CAN_TSR_TME0) == 0U) && (timeout > 0U)) {
         timeout--;
     }
-    if (timeout == 0U) return 0U;
+    if (timeout == 0U) {
+        return 0U;
+    }
 
     /*
      * 构建 TIR：
@@ -376,22 +391,49 @@ static uint8_t can1_send_std_data(uint16_t std_id, const uint8_t *data, uint8_t 
     tir = ((uint32_t)std_id << 21);
     CAN1->sTxMailBox[0].TIR = tir;
 
-    /* DLC = 数据长度 */
+    /*
+     * DLC = 数据长度。
+     * 本课主循环传入 CAN_DLC=2，只发送 data[0] 和 data[1]。
+     * 不能因为 CAN 最大 8 字节就无条件读取 data[2]~data[7]，
+     * 否则调用者只准备 2 字节缓冲区时会越界读。
+     */
     CAN1->sTxMailBox[0].TDTR = len;
 
     /*
      * 数据写入：
      * TDLR：低 4 字节 [3][2][1][0]
      * TDHR：高 4 字节 [7][6][5][4]
+     *
+     * 先清零，再按 len 逐字节填入。这样既符合 DLC 的真实含义，
+     * 也让初学者看到 CAN 的数据寄存器只是 8 个字节的打包容器。
      */
-    CAN1->sTxMailBox[0].TDLR = ((uint32_t)data[3] << 24) |
-                                ((uint32_t)data[2] << 16) |
-                                ((uint32_t)data[1] << 8) |
-                                ((uint32_t)data[0]);
-    CAN1->sTxMailBox[0].TDHR = ((uint32_t)data[7] << 24) |
-                                ((uint32_t)data[6] << 16) |
-                                ((uint32_t)data[5] << 8) |
-                                ((uint32_t)data[4]);
+    CAN1->sTxMailBox[0].TDLR = 0U;
+    CAN1->sTxMailBox[0].TDHR = 0U;
+
+    if (len > 0U) {
+        CAN1->sTxMailBox[0].TDLR |= (uint32_t)data[0];
+    }
+    if (len > 1U) {
+        CAN1->sTxMailBox[0].TDLR |= ((uint32_t)data[1] << 8);
+    }
+    if (len > 2U) {
+        CAN1->sTxMailBox[0].TDLR |= ((uint32_t)data[2] << 16);
+    }
+    if (len > 3U) {
+        CAN1->sTxMailBox[0].TDLR |= ((uint32_t)data[3] << 24);
+    }
+    if (len > 4U) {
+        CAN1->sTxMailBox[0].TDHR |= (uint32_t)data[4];
+    }
+    if (len > 5U) {
+        CAN1->sTxMailBox[0].TDHR |= ((uint32_t)data[5] << 8);
+    }
+    if (len > 6U) {
+        CAN1->sTxMailBox[0].TDHR |= ((uint32_t)data[6] << 16);
+    }
+    if (len > 7U) {
+        CAN1->sTxMailBox[0].TDHR |= ((uint32_t)data[7] << 24);
+    }
 
     /* TXRQ = 1：请求发送 */
     CAN1->sTxMailBox[0].TIR |= CAN_TI0R_TXRQ;
@@ -433,13 +475,17 @@ static uint8_t can1_receive_fifo0(uint16_t *std_id, uint8_t *len, uint8_t *data)
     uint32_t timeout = CAN_TIMEOUT_COUNT;
     uint32_t rir, rdtr, rdlr, rdhr;
 
-    if ((std_id == 0) || (len == 0) || (data == 0)) return 0U;
+    if ((std_id == 0) || (len == 0) || (data == 0)) {
+        return 0U;
+    }
 
     /* 等待 FIFO0 中有报文 */
     while (((CAN1->RF0R & CAN_RF0R_FMP0_Msk) == 0U) && (timeout > 0U)) {
         timeout--;
     }
-    if (timeout == 0U) return 0U;
+    if (timeout == 0U) {
+        return 0U;
+    }
 
     /* 读取报文寄存器 */
     rir = CAN1->sFIFOMailBox[0].RIR;
@@ -491,7 +537,12 @@ int main(void)
 
     if (can1_init() == 0U) {
         led_on();
-        while (1) { }
+        /*
+         * CAN 初始化失败时停在这里。
+         * 这样 LED 会保持故障指示状态，后面的发送/接收演示不会带着错误配置继续运行。
+         */
+        while (1) {
+        }
     }
 
     while (1) {

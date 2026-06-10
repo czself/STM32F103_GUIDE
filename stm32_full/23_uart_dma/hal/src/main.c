@@ -101,16 +101,22 @@ static void system_clock_72mhz_init(void)
     osc.PLL.PLLSource = RCC_PLLSOURCE_HSE;
     osc.PLL.PLLMUL = RCC_PLL_MUL9;
 
-    if (HAL_RCC_OscConfig(&osc) != HAL_OK) error_handler();
+    if (HAL_RCC_OscConfig(&osc) != HAL_OK) {
+        error_handler();
+    }
 
-    clk.ClockType = RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK |
-                    RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+    clk.ClockType = RCC_CLOCKTYPE_SYSCLK |
+                    RCC_CLOCKTYPE_HCLK |
+                    RCC_CLOCKTYPE_PCLK1 |
+                    RCC_CLOCKTYPE_PCLK2;
     clk.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
     clk.AHBCLKDivider = RCC_SYSCLK_DIV1;
     clk.APB1CLKDivider = RCC_HCLK_DIV2;
     clk.APB2CLKDivider = RCC_HCLK_DIV1;
 
-    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK) error_handler();
+    if (HAL_RCC_ClockConfig(&clk, FLASH_LATENCY_2) != HAL_OK) {
+        error_handler();
+    }
 }
 
 static void led_pc13_init(void)
@@ -172,7 +178,9 @@ static void dma1_channel4_init(void)
     hdma_usart1_tx.Init.Mode = DMA_NORMAL;                    /* 非循环 */
     hdma_usart1_tx.Init.Priority = DMA_PRIORITY_HIGH;
 
-    if (HAL_DMA_Init(&hdma_usart1_tx) != HAL_OK) error_handler();
+    if (HAL_DMA_Init(&hdma_usart1_tx) != HAL_OK) {
+        error_handler();
+    }
 
     /* 关联 UART 句柄和 DMA 句柄 */
     __HAL_LINKDMA(&huart1, hdmatx, hdma_usart1_tx);
@@ -205,7 +213,9 @@ static void usart1_init(void)
     huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
     huart1.Init.OverSampling = UART_OVERSAMPLING_16;
 
-    if (HAL_UART_Init(&huart1) != HAL_OK) error_handler();
+    if (HAL_UART_Init(&huart1) != HAL_OK) {
+        error_handler();
+    }
 
     /* USART1 自身的中断也要开（配合 DMA 完成收尾） */
     HAL_NVIC_SetPriority(USART1_IRQn, 1, 1);

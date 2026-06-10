@@ -149,5 +149,6 @@ static void error_handler(void)
 
 void SysTick_Handler(void)
 {
+    /* 本文件用了 HAL_Delay()，所以 SysTick 中断里必须推进 HAL tick。 */
     HAL_IncTick();
 }

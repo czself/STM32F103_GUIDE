@@ -158,6 +158,15 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     }
 }
 
+void SysTick_Handler(void)
+{
+    /*
+     * HAL_Init() 会配置 SysTick。即使本课不使用 HAL_Delay()，
+     * 最小 HAL 工程也应维护 HAL tick，避免 SysTick 进入默认中断入口。
+     */
+    HAL_IncTick();
+}
+
 static void error_handler(void)
 {
     __disable_irq();
