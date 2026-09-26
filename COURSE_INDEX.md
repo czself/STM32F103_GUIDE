@@ -10,7 +10,7 @@
 - 每课同时包含 `reg/` 和 `hal/`
 - 每课必须有详细 `README.md`
 - 每课都必须能落到一个真实可运行的 Demo
-- 讲解方式统一遵循 [TEACHING_PROMPT.md](/home/myself/workspace/mcu/stm32/STM32F103C8T6/TEACHING_PROMPT.md)
+- 讲解方式统一遵循 [TEACHING_PROMPT.md](TEACHING_PROMPT.md)
 
 ## 当前进度
 
