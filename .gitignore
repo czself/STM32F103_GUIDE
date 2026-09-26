@@ -12,3 +12,12 @@ temp/
 **/cache/
 
 **/.vscode/
+
+# Generated compilation database and PlatformIO metadata
+compile_commands.json
+.pioenvs/
+.piolibdeps/
+
+# OS metadata
+.DS_Store
+Thumbs.db
